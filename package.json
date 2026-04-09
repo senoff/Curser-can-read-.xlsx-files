@@ -4,8 +4,14 @@
   "description": "Converts .xlsx files into rich text dumps that AI coding agents (Cursor, Claude, etc.) can read — preserving values, formulas, formatting, colors, column widths, and frozen panes.",
   "main": "index.js",
   "bin": {
-    "cursor-reads-xlsx": "./index.js"
+    "cursor-reads-xlsx": "index.js"
   },
+  "files": [
+    "index.js",
+    "cursor-rule-template",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "xlsx",
     "excel",
