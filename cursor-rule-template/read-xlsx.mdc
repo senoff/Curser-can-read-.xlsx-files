@@ -1,0 +1,46 @@
+---
+description: Reading .xlsx spreadsheet files
+globs:
+alwaysApply: true
+---
+
+# Reading .xlsx Files
+
+The Read tool cannot open `.xlsx` files directly. When you need to inspect a spreadsheet:
+
+1. **Run the converter** from the project root:
+   ```bash
+   npx cursor-reads-xlsx <path-to-file.xlsx> [sheetName]
+   ```
+   - If `sheetName` is omitted, all sheets are dumped.
+   - Output is written to `.xlsx-read/<filename>--<sheet>.txt` (project root).
+   - The script prints the output path(s) to stdout.
+
+2. **Read the output file** with the Read tool. It contains:
+   - Sheet metadata (frozen panes, column widths, merged cells, auto-filters, print areas)
+   - Named ranges referencing the sheet
+   - Table definitions (name, range, columns)
+   - Image positions
+   - Every row with its cells, showing:
+     - **Value** — always present
+     - **Formula** — `[formula: =SUM(A1:A10)]` if the cell has one
+     - **Number format** — `[numFmt: 0.00%]` if not "General"
+     - **Font** — `[bold]`, `[italic]`, `[color:FF8B0000]`
+     - **Fill** — `[fill:FFFFFF00]` if background color set
+     - **Alignment** — `[align:center]` if non-default
+     - **Hyperlink** — `[link: https://...]` if the cell contains a URL
+     - **Comment** — `[note: ...]` if the cell has a comment or note
+     - **Validation** — `[validation: list [...]]` if the cell has data validation
+     - **Hidden** — `[hidden]` on the row header if the row is hidden
+   - Empty cells are omitted; empty rows show `(empty)`.
+
+3. **Do not ask the user** before running this. Just run it when you need to see an `.xlsx` file.
+
+## Useful flags
+- `--list-sheets` — list sheet names and dimensions without dumping content
+- `--stdout` — print directly to stdout instead of writing files
+- `--max-rows N` — limit output to first N rows (use for large sheets)
+
+## Important
+- Output goes to `.xlsx-read/` in the current working directory — make sure this directory is in your `.gitignore`.
+- For large files, use `--max-rows` or request a single sheet to keep output manageable.

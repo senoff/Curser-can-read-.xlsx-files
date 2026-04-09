@@ -1,0 +1,24 @@
+{
+  "name": "cursor-reads-xlsx",
+  "version": "1.0.0",
+  "description": "Converts .xlsx files into rich text dumps that AI coding agents (Cursor, Claude, etc.) can read — preserving values, formulas, formatting, colors, column widths, and frozen panes.",
+  "main": "index.js",
+  "bin": {
+    "cursor-reads-xlsx": "./index.js"
+  },
+  "keywords": [
+    "xlsx",
+    "excel",
+    "cursor",
+    "ai",
+    "cli",
+    "spreadsheet",
+    "text",
+    "converter"
+  ],
+  "author": "senoff",
+  "license": "MIT",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
