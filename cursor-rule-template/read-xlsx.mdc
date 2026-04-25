@@ -10,7 +10,7 @@ The Read tool cannot open `.xlsx` files directly. When you need to inspect a spr
 
 1. **Run the converter** from the project root:
    ```bash
-   npx cursor-reads-xlsx <path-to-file.xlsx> [sheetName]
+   npx xlsx-for-ai <path-to-file.xlsx> [sheetName]
    ```
    - If `sheetName` is omitted, all sheets are dumped.
    - Output is written to `.xlsx-read/<filename>--<sheet>.txt` (project root).
@@ -23,7 +23,7 @@ The Read tool cannot open `.xlsx` files directly. When you need to inspect a spr
    - Image positions
    - Every row with its cells, showing:
      - **Value** — always present
-     - **Formula** — `[formula: =SUM(A1:A10)]` if the cell has one
+     - **Formula** — `[formula: =SUM(A1:A10)]` (master cell) or `[shared formula ref: D2]` (drag-fill follow-up)
      - **Number format** — `[numFmt: 0.00%]` if not "General"
      - **Font** — `[bold]`, `[italic]`, `[color:FF8B0000]`
      - **Fill** — `[fill:FFFFFF00]` if background color set
@@ -39,8 +39,12 @@ The Read tool cannot open `.xlsx` files directly. When you need to inspect a spr
 ## Useful flags
 - `--list-sheets` — list sheet names and dimensions without dumping content
 - `--stdout` — print directly to stdout instead of writing files
+- `--json` — emit structured JSON (one object per cell) for easier programmatic use
+- `--compact` — suppress noisy default tags (default text colors, white fills) to reduce token usage
 - `--max-rows N` — limit output to first N rows (use for large sheets)
+- `--max-cols N` — limit output to first N columns (use for very wide sheets)
 
 ## Important
 - Output goes to `.xlsx-read/` in the current working directory — make sure this directory is in your `.gitignore`.
-- For large files, use `--max-rows` or request a single sheet to keep output manageable.
+- For large files, use `--max-rows`, `--max-cols`, or request a single sheet to keep output manageable.
+- The package was previously named `cursor-reads-xlsx` — that command name still works as an alias.

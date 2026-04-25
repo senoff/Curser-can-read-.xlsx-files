@@ -1,11 +1,11 @@
-# cursor-reads-xlsx
+# xlsx-for-ai
 
-Converts `.xlsx` files into rich text dumps that AI coding agents can actually read.
+Converts `.xlsx` files into rich text or JSON dumps that AI coding agents can actually read.
 
-AI tools like Cursor, Claude, Copilot, etc. can read text files but **not** `.xlsx` binaries. This CLI bridges the gap — it extracts everything a human would see in Excel and writes it to a plain text file:
+AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI bridges the gap. It extracts everything a human would see in Excel and writes it to a plain text file (or structured JSON):
 
 - **Values** — strings, numbers, dates
-- **Formulas** — the actual formula expression, not just the result
+- **Formulas** — the actual formula expression, plus shared-formula references
 - **Formatting** — bold, italic, font colors, background fills
 - **Number formats** — percentages, currency, custom patterns
 - **Layout** — column widths, frozen panes, merged cells, alignment
@@ -19,47 +19,49 @@ AI tools like Cursor, Claude, Copilot, etc. can read text files but **not** `.xl
 - **Auto-filters** — active filter ranges
 - **Print areas** — defined print regions
 
+> Previously published as **`cursor-reads-xlsx`**. The old name still works as an alias on the CLI, but please install the new package: `npm install -g xlsx-for-ai`.
+
 ## Install
 
 ```bash
-npm install -g cursor-reads-xlsx
+npm install -g xlsx-for-ai
 ```
 
 Or run directly with npx (no install needed):
 
 ```bash
-npx cursor-reads-xlsx budget.xlsx
+npx xlsx-for-ai budget.xlsx
 ```
 
 ## Usage
 
 ```bash
 # Dump all sheets
-npx cursor-reads-xlsx data.xlsx
+npx xlsx-for-ai data.xlsx
 
 # Dump a specific sheet
-npx cursor-reads-xlsx data.xlsx "Sheet1"
+npx xlsx-for-ai data.xlsx "Sheet1"
 
 # List sheet names and dimensions without dumping
-npx cursor-reads-xlsx data.xlsx --list-sheets
+npx xlsx-for-ai data.xlsx --list-sheets
 
 # Print to stdout instead of writing files
-npx cursor-reads-xlsx data.xlsx --stdout
+npx xlsx-for-ai data.xlsx --stdout
 
 # Limit to first 200 rows per sheet (useful for huge files)
-npx cursor-reads-xlsx data.xlsx --max-rows 200
+npx xlsx-for-ai data.xlsx --max-rows 200
 
 # Limit to first 8 columns (useful for very wide sheets)
-npx cursor-reads-xlsx data.xlsx --max-cols 8
+npx xlsx-for-ai data.xlsx --max-cols 8
 
 # Suppress noisy default tags (default text colors, white fills, etc.)
-npx cursor-reads-xlsx data.xlsx --stdout --compact
+npx xlsx-for-ai data.xlsx --stdout --compact
 
 # Emit structured JSON (one entry per cell) instead of the text dump
-npx cursor-reads-xlsx data.xlsx --json --stdout > out.json
+npx xlsx-for-ai data.xlsx --json --stdout > out.json
 
 # Combine flags
-npx cursor-reads-xlsx data.xlsx "Sheet1" --stdout --max-rows 50 --compact
+npx xlsx-for-ai data.xlsx "Sheet1" --stdout --max-rows 50 --compact
 ```
 
 ### Options
@@ -79,6 +81,8 @@ Each sheet produces a file named `<filename>--<sheetname>.txt`.
 The path(s) are printed to stdout so your agent knows where to read.
 
 ## Output Format
+
+### Text dump (default)
 
 ```
 === Sheet: Sales ===
@@ -103,8 +107,26 @@ Table: "SalesTable" A1:D20 — columns: Region, Q1, Q2, Total
   A3: "South"  [fill:FFFFFF00]
   B3: 9800  [numFmt: #,##0] [validation: list [North,South,East,West]]
   C3: 11050  [numFmt: #,##0]
-  D3: 20850  [formula: =B3+C3] [numFmt: #,##0]
+  D3: 20850  [shared formula ref: D2] [numFmt: #,##0]
 --- Row 4 (empty) [hidden] ---
+```
+
+### JSON dump (`--json`)
+
+```json
+{
+  "name": "Sales",
+  "rowCount": 4,
+  "columnCount": 4,
+  "frozen": { "rowSplit": 1, "colSplit": 0 },
+  "columns": [{ "letter": "A", "width": 12 }, ...],
+  "namedRanges": [{ "name": "Totals", "ranges": ["Sales!$D$2:$D$20"] }],
+  "tables": [{ "name": "SalesTable", "ref": "A1:D20", "columns": ["Region", "Q1", "Q2", "Total"] }],
+  "cells": [
+    { "ref": "D2", "row": 2, "col": 4, "value": { "formula": "B2+C2", "result": 31700 }, "numFmt": "#,##0" },
+    { "ref": "D3", "row": 3, "col": 4, "value": { "sharedFormulaRef": "D2", "result": 20850 }, "numFmt": "#,##0" }
+  ]
+}
 ```
 
 ### Sheet Metadata
@@ -125,7 +147,8 @@ Table: "SalesTable" A1:D20 — columns: Region, Q1, Q2, Total
 
 | Tag | Meaning |
 |-----|---------|
-| `[formula: =SUM(A1:A10)]` | Cell contains this formula |
+| `[formula: =SUM(A1:A10)]` | Cell contains this formula (master cell) |
+| `[shared formula ref: D2]` | Cell shares D2's formula (Excel "shared formula" — common when you drag-fill) |
 | `[numFmt: 0.00%]` | Number format (when not "General") |
 | `[bold]` | Bold font |
 | `[italic]` | Italic font |
@@ -145,25 +168,27 @@ Config  15 rows × 4 cols
 Archive  1200 rows × 8 cols [hidden]
 ```
 
-## Cursor Rule Template
+## Cursor / Claude / Agent Rule Template
 
 Copy the included rule template into your project so your AI agent automatically uses this tool when it encounters `.xlsx` files:
 
 ```bash
 mkdir -p .cursor/rules
-cp node_modules/cursor-reads-xlsx/cursor-rule-template/read-xlsx.mdc .cursor/rules/
+cp node_modules/xlsx-for-ai/cursor-rule-template/read-xlsx.mdc .cursor/rules/
 ```
 
-Or if you installed globally / use npx, copy the template from the repo:
+Or fetch it directly:
 
 ```bash
 mkdir -p .cursor/rules
-curl -o .cursor/rules/read-xlsx.mdc https://raw.githubusercontent.com/senoff/cursor-reads-xlsx/main/cursor-rule-template/read-xlsx.mdc
+curl -o .cursor/rules/read-xlsx.mdc https://raw.githubusercontent.com/senoff/xlsx-for-ai/main/cursor-rule-template/read-xlsx.mdc
 ```
+
+The same rule works for Claude Code (`.claude/rules/`), Copilot (`.github/copilot-instructions.md`), or any other agent — just adjust the path.
 
 ## Why This Exists
 
-Spreadsheets are everywhere in real projects — financial models, data exports, config files. AI coding agents choke on binary formats. This tool makes spreadsheets legible to AI with zero information loss.
+Spreadsheets are everywhere in real projects — financial models, data exports, config files, tax estimates. AI coding agents choke on binary formats. This tool makes spreadsheets legible to AI with zero information loss, including the tricky bits like shared formulas, named ranges, and merged cells that other tools drop.
 
 ## License
 

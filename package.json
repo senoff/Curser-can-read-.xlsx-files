@@ -1,9 +1,10 @@
 {
-  "name": "cursor-reads-xlsx",
+  "name": "xlsx-for-ai",
   "version": "1.1.0",
-  "description": "Converts .xlsx files into rich text dumps that AI coding agents (Cursor, Claude, etc.) can read — preserving values, formulas, formatting, colors, column widths, and frozen panes.",
+  "description": "CLI that converts .xlsx files into rich text or JSON dumps that AI coding agents (Claude, Cursor, Copilot, ChatGPT, etc.) can read — preserving values, formulas, formatting, colors, column widths, frozen panes, named ranges, tables, and more.",
   "main": "index.js",
   "bin": {
+    "xlsx-for-ai": "index.js",
     "cursor-reads-xlsx": "index.js"
   },
   "files": [
@@ -15,15 +16,30 @@
   "keywords": [
     "xlsx",
     "excel",
-    "cursor",
     "ai",
+    "claude",
+    "cursor",
+    "copilot",
+    "chatgpt",
+    "llm",
+    "agent",
     "cli",
     "spreadsheet",
     "text",
-    "converter"
+    "json",
+    "converter",
+    "ai-readable"
   ],
   "author": "senoff",
   "license": "MIT",
+  "homepage": "https://github.com/senoff/xlsx-for-ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/senoff/xlsx-for-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/senoff/xlsx-for-ai/issues"
+  },
   "dependencies": {
     "exceljs": "^4.4.0"
   }
