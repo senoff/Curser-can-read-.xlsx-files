@@ -49,8 +49,17 @@ npx cursor-reads-xlsx data.xlsx --stdout
 # Limit to first 200 rows per sheet (useful for huge files)
 npx cursor-reads-xlsx data.xlsx --max-rows 200
 
+# Limit to first 8 columns (useful for very wide sheets)
+npx cursor-reads-xlsx data.xlsx --max-cols 8
+
+# Suppress noisy default tags (default text colors, white fills, etc.)
+npx cursor-reads-xlsx data.xlsx --stdout --compact
+
+# Emit structured JSON (one entry per cell) instead of the text dump
+npx cursor-reads-xlsx data.xlsx --json --stdout > out.json
+
 # Combine flags
-npx cursor-reads-xlsx data.xlsx "Sheet1" --stdout --max-rows 50
+npx cursor-reads-xlsx data.xlsx "Sheet1" --stdout --max-rows 50 --compact
 ```
 
 ### Options
@@ -59,7 +68,10 @@ npx cursor-reads-xlsx data.xlsx "Sheet1" --stdout --max-rows 50
 |------|-------------|
 | `--list-sheets` | Print sheet names, row/column counts, and visibility — then exit |
 | `--stdout` | Print output to stdout instead of writing `.txt` files |
+| `--json` | Emit structured JSON (one object per cell with value/formula/format/style) |
+| `--compact` | Suppress noisy default tags (default text color, white fill, etc.) — reduces token usage for AI agents |
 | `--max-rows N` | Cap output at the first N rows per sheet |
+| `--max-cols N` | Cap output at the first N columns per sheet |
 | `-h`, `--help` | Show help message |
 
 Output files are written to `.xlsx-read/` in the current working directory.

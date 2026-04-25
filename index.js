@@ -9,13 +9,25 @@ const ExcelJS = require('exceljs');
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const opts = { positional: [], listSheets: false, stdout: false, maxRows: null, help: false };
+  const opts = {
+    positional: [],
+    listSheets: false,
+    stdout: false,
+    json: false,
+    compact: false,
+    maxRows: null,
+    maxCols: null,
+    help: false,
+  };
   let i = 0;
   while (i < argv.length) {
     const arg = argv[i];
     if (arg === '--list-sheets')       opts.listSheets = true;
     else if (arg === '--stdout')       opts.stdout = true;
+    else if (arg === '--json')         opts.json = true;
+    else if (arg === '--compact')      opts.compact = true;
     else if (arg === '--max-rows')   { opts.maxRows = parseInt(argv[++i], 10); }
+    else if (arg === '--max-cols')   { opts.maxCols = parseInt(argv[++i], 10); }
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else                               opts.positional.push(arg);
     i++;
@@ -26,19 +38,26 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`Usage: npx cursor-reads-xlsx <file.xlsx> [sheetName] [options]
 
-Converts .xlsx to rich text that AI coding agents can read.
+Converts .xlsx to rich text (or JSON) that AI coding agents can read.
 
 Options:
   --list-sheets   List sheet names, dimensions, and visibility then exit
   --stdout        Print output to stdout instead of writing files
+  --json          Emit structured JSON instead of the human-readable text dump
+                  (one object per cell with value/formula/format/style)
+  --compact       Suppress noisy default tags (default text color, default font,
+                  General number format, etc.) to reduce token usage
   --max-rows N    Limit output to the first N rows per sheet
+  --max-cols N    Limit output to the first N columns per sheet
   -h, --help      Show this help message
 
 Examples:
   npx cursor-reads-xlsx data.xlsx
   npx cursor-reads-xlsx data.xlsx "Sheet1"
   npx cursor-reads-xlsx data.xlsx --list-sheets
-  npx cursor-reads-xlsx data.xlsx --stdout --max-rows 100`);
+  npx cursor-reads-xlsx data.xlsx --stdout --max-rows 100
+  npx cursor-reads-xlsx data.xlsx --stdout --compact
+  npx cursor-reads-xlsx data.xlsx --json --stdout > out.json`);
 }
 
 // ---------------------------------------------------------------------------
@@ -52,17 +71,38 @@ function colLetter(n) {
   return s;
 }
 
-function describeFill(fill) {
+// Colors that are visually indistinguishable from the default Excel text (near-black).
+// In --compact mode we suppress these to reduce token noise.
+const DEFAULT_TEXT_COLORS = new Set([
+  'FF000000', // pure black
+  'FF1F1F1F', // dark gray (Excel auto-text on some themes)
+  'FF222120', // dark gray variant
+  'FF333333',
+]);
+
+function isDefaultTextColor(argb) {
+  return argb && DEFAULT_TEXT_COLORS.has(argb.toUpperCase());
+}
+
+function describeFill(fill, compact) {
   if (!fill || (fill.type === 'pattern' && fill.pattern === 'none')) return null;
-  if (fill.type === 'pattern' && fill.fgColor?.argb) return `fill:${fill.fgColor.argb}`;
+  if (fill.type === 'pattern' && fill.fgColor?.argb) {
+    // White / no-fill patterns are noise in compact mode
+    if (compact && /^FF?FFFFFF$/i.test(fill.fgColor.argb)) return null;
+    return `fill:${fill.fgColor.argb}`;
+  }
   return null;
 }
 
-function describeFont(font) {
+function describeFont(font, compact) {
   const parts = [];
   if (font?.bold)   parts.push('bold');
   if (font?.italic) parts.push('italic');
-  if (font?.color?.argb) parts.push(`color:${font.color.argb}`);
+  if (font?.color?.argb) {
+    if (!(compact && isDefaultTextColor(font.color.argb))) {
+      parts.push(`color:${font.color.argb}`);
+    }
+  }
   return parts;
 }
 
@@ -75,9 +115,20 @@ function formatValue(v) {
   if (typeof v === 'object' && v.hyperlink) {
     return `"${v.text || v.hyperlink}"`;
   }
-  if (typeof v === 'object' && v.formula) {
-    return String(v.result ?? '');
+  // Formula cells: 'formula' on master, 'sharedFormula' on follow-ups, 'result' is the computed value
+  if (typeof v === 'object' && (v.formula || v.sharedFormula)) {
+    const result = v.result;
+    if (result == null) return '""';
+    // Result may itself be a rich object (error, richText, etc.)
+    if (typeof result === 'object') {
+      if (result.error) return `"#${result.error}"`;
+      if (result.richText) return `"${result.richText.map(r => r.text).join('')}"`;
+      return JSON.stringify(result);
+    }
+    if (typeof result === 'string') return `"${result}"`;
+    return String(result);
   }
+  if (typeof v === 'object' && v.error) return `"#${v.error}"`;
   if (typeof v === 'string') return `"${v}"`;
   return String(v);
 }
@@ -117,7 +168,8 @@ function getNamedRanges(wb, sheetName) {
 // Sheet dump
 // ---------------------------------------------------------------------------
 
-function dumpSheet(ws, wb, maxRows) {
+function dumpSheet(ws, wb, opts = {}) {
+  const { maxRows = null, maxCols = null, compact = false } = opts;
   const lines = [];
 
   lines.push(`=== Sheet: ${ws.name} ===`);
@@ -130,9 +182,10 @@ function dumpSheet(ws, wb, maxRows) {
   }
 
   // Column widths + hidden columns
+  const totalCols = maxCols ? Math.min(ws.columnCount, maxCols) : ws.columnCount;
   const colWidths = [];
   const hiddenCols = [];
-  for (let c = 1; c <= ws.columnCount; c++) {
+  for (let c = 1; c <= totalCols; c++) {
     const col = ws.getColumn(c);
     const letter = colLetter(c);
     if (col.hidden) hiddenCols.push(letter);
@@ -140,6 +193,9 @@ function dumpSheet(ws, wb, maxRows) {
   }
   if (colWidths.length) lines.push(`Columns: ${colWidths.join(' ')}`);
   if (hiddenCols.length) lines.push(`Hidden columns: ${hiddenCols.join(', ')}`);
+  if (maxCols && ws.columnCount > maxCols) {
+    lines.push(`(${ws.columnCount - maxCols} more columns truncated at --max-cols ${maxCols})`);
+  }
 
   // Merged cells
   const merges = Object.keys(ws._merges || {});
@@ -216,7 +272,7 @@ function dumpSheet(ws, wb, maxRows) {
     const cells = [];
     const isHidden = row.hidden;
 
-    for (let c = 1; c <= ws.columnCount; c++) {
+    for (let c = 1; c <= totalCols; c++) {
       const cell = row.getCell(c);
       const raw = cell.value;
       if (raw == null || raw === '') continue;
@@ -224,10 +280,15 @@ function dumpSheet(ws, wb, maxRows) {
       const ref = `${colLetter(c)}${r}`;
       const tags = [];
 
-      // Formula
+      // Formula (handle both standalone and shared formulas)
       if (cell.type === ExcelJS.ValueType.Formula) {
-        const formula = typeof raw === 'object' ? raw.formula : null;
-        if (formula) tags.push(`formula: =${formula}`);
+        if (typeof raw === 'object') {
+          if (raw.formula) {
+            tags.push(`formula: =${raw.formula}`);
+          } else if (raw.sharedFormula) {
+            tags.push(`shared formula ref: ${raw.sharedFormula}`);
+          }
+        }
       }
 
       // Number format
@@ -236,11 +297,11 @@ function dumpSheet(ws, wb, maxRows) {
       }
 
       // Font
-      const fontTags = describeFont(cell.font);
+      const fontTags = describeFont(cell.font, compact);
       if (fontTags.length) tags.push(...fontTags);
 
       // Fill
-      const fillDesc = describeFill(cell.fill);
+      const fillDesc = describeFill(cell.fill, compact);
       if (fillDesc) tags.push(fillDesc);
 
       // Alignment
@@ -299,6 +360,148 @@ function dumpSheet(ws, wb, maxRows) {
 }
 
 // ---------------------------------------------------------------------------
+// JSON dump (structured per-cell output)
+// ---------------------------------------------------------------------------
+
+function jsonValue(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'object') {
+    if (v.richText) return v.richText.map(r => r.text).join('');
+    if (v.hyperlink) return { text: v.text || v.hyperlink, hyperlink: v.hyperlink };
+    if (v.formula || v.sharedFormula) {
+      const out = {};
+      if (v.formula) out.formula = v.formula;
+      if (v.sharedFormula) out.sharedFormulaRef = v.sharedFormula;
+      const result = v.result;
+      if (result == null) {
+        out.result = null;
+      } else if (typeof result === 'object') {
+        if (result.error) out.result = `#${result.error}`;
+        else if (result.richText) out.result = result.richText.map(r => r.text).join('');
+        else out.result = result;
+      } else {
+        out.result = result;
+      }
+      return out;
+    }
+    if (v.error) return `#${v.error}`;
+  }
+  return v;
+}
+
+function dumpSheetJSON(ws, wb, opts = {}) {
+  const { maxRows = null, maxCols = null } = opts;
+  const totalCols = maxCols ? Math.min(ws.columnCount, maxCols) : ws.columnCount;
+  const rowLimit = maxRows ? Math.min(ws.rowCount, maxRows) : ws.rowCount;
+
+  const out = {
+    name: ws.name,
+    state: ws.state || 'visible',
+    rowCount: ws.rowCount,
+    columnCount: ws.columnCount,
+    truncated: {
+      rows: maxRows && ws.rowCount > maxRows ? ws.rowCount - maxRows : 0,
+      cols: maxCols && ws.columnCount > maxCols ? ws.columnCount - maxCols : 0,
+    },
+    frozen: null,
+    columns: [],
+    hiddenColumns: [],
+    merges: Object.keys(ws._merges || {}),
+    autoFilter: null,
+    printArea: null,
+    namedRanges: getNamedRanges(wb, ws.name),
+    tables: [],
+    images: [],
+    cells: [],
+  };
+
+  // Frozen panes
+  const frozen = (ws.views || []).find(v => v.state === 'frozen');
+  if (frozen) out.frozen = { rowSplit: frozen.ySplit ?? 0, colSplit: frozen.xSplit ?? 0 };
+
+  // Columns
+  for (let c = 1; c <= totalCols; c++) {
+    const col = ws.getColumn(c);
+    const letter = colLetter(c);
+    if (col.hidden) out.hiddenColumns.push(letter);
+    out.columns.push({ letter, width: col.width || null, hidden: !!col.hidden });
+  }
+
+  // Auto-filter
+  if (ws.autoFilter) {
+    out.autoFilter = typeof ws.autoFilter === 'string'
+      ? ws.autoFilter
+      : (ws.autoFilter.ref || null);
+  }
+
+  // Print area
+  try { if (ws.pageSetup?.printArea) out.printArea = ws.pageSetup.printArea; } catch (_) {}
+
+  // Tables
+  try {
+    const tableMap = ws.tables;
+    if (tableMap && typeof tableMap === 'object') {
+      const tables = typeof tableMap.forEach === 'function'
+        ? (() => { const a = []; tableMap.forEach(t => a.push(t)); return a; })()
+        : Object.values(tableMap);
+      for (const t of tables) {
+        const model = t.table || t.model || t;
+        out.tables.push({
+          name: model.name || model.displayName || null,
+          ref: model.ref || model.tableRef || null,
+          columns: (model.columns || []).map(c => c.name).filter(Boolean),
+        });
+      }
+    }
+  } catch (_) {}
+
+  // Images
+  try {
+    const images = typeof ws.getImages === 'function' ? ws.getImages() : [];
+    for (const img of images) {
+      if (img.range) {
+        const tl = img.range.tl, br = img.range.br;
+        out.images.push({
+          tl: tl ? `${colLetter(Math.floor(tl.col) + 1)}${Math.floor(tl.row) + 1}` : null,
+          br: br ? `${colLetter(Math.floor(br.col) + 1)}${Math.floor(br.row) + 1}` : null,
+        });
+      }
+    }
+  } catch (_) {}
+
+  // Cells
+  for (let r = 1; r <= rowLimit; r++) {
+    const row = ws.getRow(r);
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = row.getCell(c);
+      const raw = cell.value;
+      if (raw == null || raw === '') continue;
+
+      const entry = {
+        ref: `${colLetter(c)}${r}`,
+        row: r,
+        col: c,
+        value: jsonValue(raw),
+      };
+      if (cell.numFmt && cell.numFmt !== 'General') entry.numFmt = cell.numFmt;
+      if (cell.font?.bold) entry.bold = true;
+      if (cell.font?.italic) entry.italic = true;
+      if (cell.font?.color?.argb) entry.color = cell.font.color.argb;
+      if (cell.fill?.type === 'pattern' && cell.fill.fgColor?.argb) entry.fill = cell.fill.fgColor.argb;
+      if (cell.alignment?.horizontal && cell.alignment.horizontal !== 'general') entry.align = cell.alignment.horizontal;
+      if (cell.hyperlink) entry.hyperlink = cell.hyperlink;
+      if (cell.note) entry.note = describeNote(cell.note);
+      if (cell.dataValidation) entry.dataValidation = cell.dataValidation;
+      if (row.hidden) entry.rowHidden = true;
+      out.cells.push(entry);
+    }
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // List sheets mode
 // ---------------------------------------------------------------------------
 
@@ -353,21 +556,40 @@ async function main() {
 
   const baseName = path.basename(xlsxPath, path.extname(xlsxPath));
 
-  // --stdout: print to console
+  const dumpOpts = { maxRows: opts.maxRows, maxCols: opts.maxCols, compact: opts.compact };
+
+  // --json mode: structured per-cell output
+  if (opts.json) {
+    const payload = sheets.map(ws => dumpSheetJSON(ws, wb, dumpOpts));
+    const json = JSON.stringify(sheets.length === 1 ? payload[0] : payload, null, 2);
+
+    if (opts.stdout) {
+      process.stdout.write(json + '\n');
+      process.exit(0);
+    }
+    const outDir = path.join(process.cwd(), '.xlsx-read');
+    fs.mkdirSync(outDir, { recursive: true });
+    const outFile = path.join(outDir, `${baseName}.json`);
+    fs.writeFileSync(outFile, json, 'utf8');
+    console.log(outFile);
+    process.exit(0);
+  }
+
+  // --stdout: print text dump to console
   if (opts.stdout) {
     for (const ws of sheets) {
-      console.log(dumpSheet(ws, wb, opts.maxRows));
+      console.log(dumpSheet(ws, wb, dumpOpts));
       console.log('');
     }
     process.exit(0);
   }
 
-  // Default: write to .xlsx-read/ files
+  // Default: write text dump to .xlsx-read/ files
   const outDir = path.join(process.cwd(), '.xlsx-read');
   fs.mkdirSync(outDir, { recursive: true });
 
   for (const ws of sheets) {
-    const content = dumpSheet(ws, wb, opts.maxRows);
+    const content = dumpSheet(ws, wb, dumpOpts);
     const safeName = ws.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     const outFile = path.join(outDir, `${baseName}--${safeName}.txt`);
     fs.writeFileSync(outFile, content, 'utf8');
