@@ -36,7 +36,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: npx cursor-reads-xlsx <file.xlsx> [sheetName] [options]
+  console.log(`Usage: npx xlsx-for-ai <file.xlsx> [sheetName] [options]
 
 Converts .xlsx to rich text (or JSON) that AI coding agents can read.
 
@@ -52,12 +52,15 @@ Options:
   -h, --help      Show this help message
 
 Examples:
-  npx cursor-reads-xlsx data.xlsx
-  npx cursor-reads-xlsx data.xlsx "Sheet1"
-  npx cursor-reads-xlsx data.xlsx --list-sheets
-  npx cursor-reads-xlsx data.xlsx --stdout --max-rows 100
-  npx cursor-reads-xlsx data.xlsx --stdout --compact
-  npx cursor-reads-xlsx data.xlsx --json --stdout > out.json`);
+  npx xlsx-for-ai data.xlsx
+  npx xlsx-for-ai data.xlsx "Sheet1"
+  npx xlsx-for-ai data.xlsx --list-sheets
+  npx xlsx-for-ai data.xlsx --stdout --max-rows 100
+  npx xlsx-for-ai data.xlsx --stdout --compact
+  npx xlsx-for-ai data.xlsx --json --stdout > out.json
+
+Note: this package was previously published as 'cursor-reads-xlsx';
+that command name still works as an alias.`);
 }
 
 // ---------------------------------------------------------------------------
