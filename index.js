@@ -1,5 +1,24 @@
 #!/usr/bin/env node
 
+// Self-respawn with a larger V8 heap before loading anything else.
+// Some real-world .xlsx files (sub-1MB on disk but with huge calc chains or
+// shared-string tables) blow Node's default ~4GB heap during parse. Re-execing
+// with --max-old-space-size=8192 fixes this transparently. The sentinel env
+// var prevents an infinite respawn loop.
+if (!process.env.XLSX_FOR_AI_RESPAWNED) {
+  const v8 = require('v8');
+  const heapLimitMB = v8.getHeapStatistics().heap_size_limit / 1024 / 1024;
+  if (heapLimitMB < 8000) {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(
+      process.execPath,
+      ['--max-old-space-size=8192', __filename, ...process.argv.slice(2)],
+      { stdio: 'inherit', env: { ...process.env, XLSX_FOR_AI_RESPAWNED: '1' } }
+    );
+    process.exit(r.status ?? 1);
+  }
+}
+
 const path = require('path');
 const fs   = require('fs');
 const ExcelJS = require('exceljs');
@@ -537,8 +556,32 @@ async function main() {
     process.exit(1);
   }
 
+  const stat = fs.statSync(xlsxPath);
+  if (stat.size === 0) {
+    console.error(`File is empty (0 bytes), not a valid xlsx: ${xlsxPath}`);
+    process.exit(1);
+  }
+  // Minimum valid zip is a 22-byte end-of-central-directory record. Anything
+  // smaller cannot be an xlsx; ExcelJS would crash with a misleading
+  // "Corrupted zip" error from deep in its parser.
+  if (stat.size < 22) {
+    console.error(`File is too small (${stat.size} bytes) to be a valid xlsx: ${xlsxPath}`);
+    process.exit(1);
+  }
+
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(xlsxPath);
+  try {
+    await wb.xlsx.readFile(xlsxPath);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    console.error(`Failed to read ${xlsxPath}: ${msg}`);
+    if (/End of data reached|Corrupted zip|invalid signature/i.test(msg)) {
+      console.error('Hint: file may be truncated or not a real xlsx. Try opening it in Excel to confirm.');
+    } else if (/Cannot read propert/i.test(msg)) {
+      console.error('Hint: file parsed as a zip but a workbook part is malformed. Try --list-sheets for a lighter probe.');
+    }
+    process.exit(1);
+  }
 
   // --list-sheets: print summary and exit
   if (opts.listSheets) {
@@ -551,9 +594,12 @@ async function main() {
     : wb.worksheets;
 
   if (sheets.length === 0) {
-    console.error(sheetFilter
-      ? `Sheet "${sheetFilter}" not found. Available: ${wb.worksheets.map(s => s.name).join(', ')}`
-      : 'No sheets in workbook');
+    if (sheetFilter) {
+      console.error(`Sheet "${sheetFilter}" not found. Available: ${wb.worksheets.map(s => s.name).join(', ')}`);
+    } else {
+      console.error('No sheets in workbook.');
+      console.error('Hint: this can happen when a non-Excel tool wrote the file with backslashes in zip entry paths (e.g. xl\\worksheets\\sheet1.xml). ExcelJS only recognizes forward-slash entries.');
+    }
     process.exit(1);
   }
 
@@ -601,6 +647,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err.message);
+  const msg = err && err.message ? err.message : String(err);
+  console.error(msg);
+  if (/Invalid string length/i.test(msg)) {
+    console.error('Hint: this sheet renders to a text dump larger than V8\'s 512MB string limit. Try --max-rows N or --max-cols N to bound the output, or --json which streams per cell.');
+  }
   process.exit(1);
 });
