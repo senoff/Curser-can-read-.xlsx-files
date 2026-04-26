@@ -1,8 +1,14 @@
 # xlsx-for-ai
 
-Converts `.xlsx` files into rich text or JSON dumps that AI coding agents can actually read.
+Converts spreadsheets into text, **markdown**, JSON, SQL, or schema dumps that AI coding agents can actually read.
 
-AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI bridges the gap. It extracts everything a human would see in Excel and writes it to a plain text file (or structured JSON):
+AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI bridges the gap.
+
+**Input formats:** `.xlsx` `.xls` `.xlsb` `.ods` `.csv` `.tsv`
+
+**Output modes:** text dump, markdown tables (best LLM comprehension per token), JSON, SQL `CREATE TABLE`+`INSERT`, inferred schema, workbook diff.
+
+It extracts everything a human would see in Excel:
 
 - **Values** — strings, numbers, dates
 - **Formulas** — the actual formula expression, plus shared-formula references
@@ -66,18 +72,44 @@ npx xlsx-for-ai data.xlsx "Sheet1" --stdout --max-rows 50 --compact
 
 ### Options
 
+**Output modes** (mutually exclusive; default = text):
+
 | Flag | Description |
 |------|-------------|
-| `--list-sheets` | Print sheet names, row/column counts, and visibility — then exit |
-| `--stdout` | Print output to stdout instead of writing `.txt` files |
-| `--json` | Emit structured JSON (one object per cell with value/formula/format/style) |
-| `--compact` | Suppress noisy default tags (default text color, white fill, etc.) — reduces token usage for AI agents |
-| `--max-rows N` | Cap output at the first N rows per sheet |
-| `--max-cols N` | Cap output at the first N columns per sheet |
-| `-h`, `--help` | Show help message |
+| `--md` | Markdown tables — highest LLM comprehension per token |
+| `--json` | Structured JSON, one object per cell |
+| `--sql` | `CREATE TABLE` + `INSERT` statements (uses inferred schema) |
+| `--schema` | Per-column schema (name, type, nullable, samples) as JSON |
+
+**Selection:**
+
+| Flag | Description |
+|------|-------------|
+| `[sheetName]` | Positional: dump only this sheet |
+| `--range A1:D50` | Dump only this rectangular range |
+| `--named-range NAME` | Dump only the cells covered by a workbook-defined name |
+| `--max-rows N` | Cap at the first N rows per sheet |
+| `--max-cols N` | Cap at the first N columns per sheet |
+
+**Output control:**
+
+| Flag | Description |
+|------|-------------|
+| `--list-sheets` | Print sheet names + dimensions and exit |
+| `--stdout` | Print to stdout instead of writing files in `.xlsx-read/` |
+| `--compact` | Suppress noisy default tags (default colors, "General" format) |
+| `--max-tokens N` | Truncate output to ~N tokens; appends a tail summary noting what was dropped |
+| `--evaluate` | Promote cached formula results to primary value; re-evaluate simple formulas via formulajs |
+
+**Other modes:**
+
+| Flag | Description |
+|------|-------------|
+| `--diff OTHER` | Diff this workbook vs `OTHER` — emit changed/added/removed cells and sheets |
+| `--stream` | Streaming reader for huge `.xlsx` files (>100MB); emits row-by-row, drops some sheet metadata |
+| `-h`, `--help` | Show help |
 
 Output files are written to `.xlsx-read/` in the current working directory.
-Each sheet produces a file named `<filename>--<sheetname>.txt`.
 The path(s) are printed to stdout so your agent knows where to read.
 
 ## Output Format
