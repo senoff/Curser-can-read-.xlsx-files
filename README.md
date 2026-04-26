@@ -1,5 +1,7 @@
 # xlsx-for-ai
 
+> 👋 **New here? Not a programmer?** → [Read WHY.md for the plain-English version](WHY.md). The README below is the technical reference.
+
 Converts spreadsheets into text, **markdown**, JSON, SQL, or schema dumps that AI coding agents can actually read.
 
 AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI bridges the gap.

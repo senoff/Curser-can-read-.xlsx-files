@@ -1,50 +1,100 @@
 ---
-description: Reading .xlsx spreadsheet files
+description: Reading and converting spreadsheets (.xlsx, .xls, .xlsb, .ods, .csv, .tsv) for AI agents
 globs:
 alwaysApply: true
 ---
 
-# Reading .xlsx Files
+# Reading Spreadsheet Files
 
-The Read tool cannot open `.xlsx` files directly. When you need to inspect a spreadsheet:
+The Read tool cannot open binary spreadsheet files directly. When you need to inspect or process a spreadsheet, use `xlsx-for-ai`.
 
-1. **Run the converter** from the project root:
-   ```bash
-   npx xlsx-for-ai <path-to-file.xlsx> [sheetName]
-   ```
-   - If `sheetName` is omitted, all sheets are dumped.
-   - Output is written to `.xlsx-read/<filename>--<sheet>.txt` (project root).
-   - The script prints the output path(s) to stdout.
+**Supported input:** `.xlsx` `.xls` `.xlsb` `.ods` `.csv` `.tsv`
 
-2. **Read the output file** with the Read tool. It contains:
-   - Sheet metadata (frozen panes, column widths, merged cells, auto-filters, print areas)
-   - Named ranges referencing the sheet
-   - Table definitions (name, range, columns)
-   - Image positions
-   - Every row with its cells, showing:
-     - **Value** — always present
-     - **Formula** — `[formula: =SUM(A1:A10)]` (master cell) or `[shared formula ref: D2]` (drag-fill follow-up)
-     - **Number format** — `[numFmt: 0.00%]` if not "General"
-     - **Font** — `[bold]`, `[italic]`, `[color:FF8B0000]`
-     - **Fill** — `[fill:FFFFFF00]` if background color set
-     - **Alignment** — `[align:center]` if non-default
-     - **Hyperlink** — `[link: https://...]` if the cell contains a URL
-     - **Comment** — `[note: ...]` if the cell has a comment or note
-     - **Validation** — `[validation: list [...]]` if the cell has data validation
-     - **Hidden** — `[hidden]` on the row header if the row is hidden
-   - Empty cells are omitted; empty rows show `(empty)`.
+## Basic usage
 
-3. **Do not ask the user** before running this. Just run it when you need to see an `.xlsx` file.
+```bash
+npx xlsx-for-ai <file> [sheetName]
+```
 
-## Useful flags
-- `--list-sheets` — list sheet names and dimensions without dumping content
-- `--stdout` — print directly to stdout instead of writing files
-- `--json` — emit structured JSON (one object per cell) for easier programmatic use
-- `--compact` — suppress noisy default tags (default text colors, white fills) to reduce token usage
-- `--max-rows N` — limit output to first N rows (use for large sheets)
-- `--max-cols N` — limit output to first N columns (use for very wide sheets)
+- If `sheetName` is omitted, all sheets are dumped.
+- Default output: text dump to `.xlsx-read/<filename>--<sheet>.txt` (project root).
+- Path(s) printed to stdout for the agent to read next.
+
+**Do not ask the user before running this.** Just run it when you encounter a spreadsheet.
+
+## Pick the right output mode
+
+| When you want… | Use | Why |
+|---|---|---|
+| To read a sheet for context | `--md --stdout` | Markdown tables — best LLM comprehension per token |
+| Programmatic per-cell access | `--json --stdout` | Structured, one object per cell with formula/format/style |
+| To bound output to a context window | `--max-tokens 8000 --stdout` | Truncates with a tail summary noting what was dropped |
+| To understand columns / build a query | `--schema --stdout` | Inferred types per column (INTEGER / NUMERIC / DATE / BOOLEAN / TEXT) |
+| To import data into a database | `--sql --stdout` | `CREATE TABLE` + `INSERT` statements, types from --schema |
+| To compare two versions | `--diff OTHER --stdout` | Emits added/removed/changed sheets and cells |
+| To list sheets without parsing | `--list-sheets` | Fast probe; lighter than full read |
+| To handle huge files (>100MB) | `--stream --stdout` | Row-by-row reader, drops some sheet metadata |
+
+## Selection (focus the output)
+
+| Flag | Effect |
+|---|---|
+| `[sheetName]` | Positional second arg — only this sheet |
+| `--range A1:D50` | Only this rectangular range |
+| `--named-range NAME` | Only the cells covered by a workbook-defined name |
+| `--max-rows N` | Cap rows per sheet |
+| `--max-cols N` | Cap columns per sheet |
+
+Combine selection flags with any output mode. Use `--range` aggressively when you only need a section of a large model — it can reduce context 50× vs. dumping the whole sheet.
+
+## Other useful flags
+
+- `--compact` — suppress noisy default tags (default colors, "General" format, white fills)
+- `--evaluate` — promote cached formula results to the primary value; recompute simple formulas via formulajs
+- `--stdout` — print directly instead of writing files
+
+## What the default text dump contains
+
+- Sheet metadata (frozen panes, column widths, merged cells, auto-filters, print areas)
+- Named ranges referencing the sheet
+- Table definitions (name, range, columns)
+- Image positions
+- Every non-empty row with its cells, showing:
+  - **Value** — always present
+  - **Formula** — `[formula: =SUM(A1:A10)]` (master) or `[shared formula ref: D2]` (drag-fill follow-up)
+  - **Number format** — `[numFmt: 0.00%]` if not "General"
+  - **Font** — `[bold]`, `[italic]`, `[color:FF8B0000]`
+  - **Fill** — `[fill:FFFFFF00]`
+  - **Alignment** — `[align:center]` if non-default
+  - **Hyperlink** — `[link: https://...]`
+  - **Comment** — `[note: ...]`
+  - **Validation** — `[validation: list [...]]`
+  - **Hidden** — `[hidden]` on the row header
+
+## Examples
+
+```bash
+# Quick read of a financial model — markdown is most context-efficient
+npx xlsx-for-ai model.xlsx --md --stdout
+
+# Just one sheet, fits in a small context window
+npx xlsx-for-ai model.xlsx "Assumptions" --md --stdout --max-tokens 4000
+
+# Schema for a CSV before writing SQL
+npx xlsx-for-ai data.csv --schema --stdout
+
+# Surgical extraction — only one section of a huge sheet
+npx xlsx-for-ai model.xlsx "Detail" --range B5:H50 --stdout
+
+# Compare two model versions, get a change summary
+npx xlsx-for-ai v1.xlsx --diff v2.xlsx --stdout
+
+# Huge file (>100MB) — streaming mode keeps memory bounded
+npx xlsx-for-ai dump.xlsx --stream --stdout --max-rows 1000
+```
 
 ## Important
-- Output goes to `.xlsx-read/` in the current working directory — make sure this directory is in your `.gitignore`.
-- For large files, use `--max-rows`, `--max-cols`, or request a single sheet to keep output manageable.
+
+- Output goes to `.xlsx-read/` in the current working directory — add this to `.gitignore`.
+- For huge files, prefer `--max-tokens` over `--max-rows` if you're targeting an LLM context window — token count and row count don't correlate.
 - The package was previously named `cursor-reads-xlsx` — that command name still works as an alias.
