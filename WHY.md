@@ -27,26 +27,63 @@ That's the difference between a friend skimming the printed numbers and an analy
 A few examples people find useful:
 
 - **Have your AI find errors in a financial model** before you send it to your accountant or your board.
-- **Have your AI hand you back a corrected version** — not just *say* what should change, but actually produce the fixed `.xlsx` with the changes applied. The corrected file even includes a built-in review note explaining what the AI changed, why, and how to override anything you don't agree with. Same shape as having a careful editor mark up your draft.
 - **Compare two versions of the same spreadsheet** ("what changed between V11 and V14?") and get a list of every cell that moved.
 - **Turn a CSV export from QuickBooks into a clean SQL database table** in one command, with the column types figured out automatically.
 - **Walk through a 50-tab model someone else built** and have the AI explain how the sheets reference each other.
 - **Process a folder of legacy `.xls` files** that won't even open in modern Excel without complaint.
 
+But the biggest unlock is the next thing.
+
+## Now your AI can hand you back the file — not just words
+
+Before, even once AI could read your spreadsheet, it could only *tell* you what to change. You'd still have to translate its advice into actual cell edits yourself. Tedious for two cells. Impossible for fifty.
+
+Now the AI can do the editing for you. Same starting moment — you ask Claude to review your tax estimate, or update Q4 numbers in your forecast, or fix a broken cap table — but instead of describing the corrections, it builds you the actual fixed `.xlsx` and hands it back.
+
+A real moment that gets unlocked:
+
+> **You:** *"Here's our 2026 budget V11. Sales asked us to add a Travel line and bump Marketing to $52K each quarter. Update it."*
+>
+> **Claude (after a moment):** *"Done. I added a Travel row at the bottom with placeholder zeros (since you didn't give numbers), bumped Marketing to $52,000 across all four quarters, and updated the totals row to reflect the new sum. Here's V12 — I left a note in the file explaining everything I did."*
+
+You open V12 in Excel. Marketing is updated. Travel exists. Totals are right. Then you flip to the rightmost tab — `_xlsx-for-ai` — and find what looks like a careful editor's notes on the changes.
+
+## What's in the review tab
+
+It's the AI's note to you about exactly what it changed and why, written in plain English. For each kind of change, you get a small block like this:
+
+> **Issue: Marketing line update** *(4 cells)*
+>
+> **What happened.** You asked to bump Marketing to $52,000 per quarter.
+>
+> **What we did.** Updated B12, C12, D12, E12 to $52,000 each.
+>
+> **Risk.** The totals row (row 20) recomputes automatically — confirm the new bottom-line totals match what you expected.
+>
+> **Alternative.** If you wanted Marketing scaled differently per quarter (e.g., higher in Q4), tell me and I'll redo it.
+
+You can read the whole tab in 30 seconds. Then you either accept what the AI did, or push back on any individual item. Same shape as a careful editor marking up your draft — observation, reasoning, and a clear way to override.
+
+This is on purpose. The tool is designed around the **supervisor** model: AI does the work, but the human stays in control of every decision. The review tab is what makes that real — without it, the AI would be making silent changes you'd only discover by accident later. With it, every choice the AI made is visible, named, and reversible.
+
+## Why this matters
+
+Without the corrected file, AI is a really expensive consultant. It looks at your spreadsheet, talks for a while, and leaves you with a list of things to do yourself. No leverage on the actual work.
+
+With the corrected file, AI is more like a junior analyst. It does the work, hands you the result, explains its reasoning, and waits for your review. Same role you've always wanted — without the hourly rate.
+
 ## How to actually use it
 
-It's a small command-line tool. Once a programmer sets it up (one line: `npm install -g xlsx-for-ai`), you don't have to think about it again — your AI tools pick it up automatically and start using it whenever they encounter a spreadsheet.
+You don't run anything. Your AI does.
+
+1. **Install once.** A programmer (or you, if you're comfortable with one terminal command) runs `npm install -g xlsx-for-ai`. Then forget about it.
+2. **Drop a file into Claude, Cursor, Copilot, or ChatGPT** (the desktop apps with code execution, or any agent setup that can run commands). The AI picks up the tool automatically when it sees a spreadsheet.
+3. **Ask whatever you want** — review, fix errors, update numbers, generate reports, compare versions, restructure.
+4. **The AI hands back** either a text answer (when that's what you asked for) or a real `.xlsx` file with the review tab (when you asked for changes).
+
+Most users never type a command.
 
 If you're the programmer doing the install, the [README](README.md) has the full reference. If you're handing this to a programmer to set up for you, that link is what they'll need.
-
-## How it works in plain terms
-
-Today's AI is great at reasoning about text but blind to spreadsheet binaries. `xlsx-for-ai` is the translator in both directions:
-
-- **Reading:** turns your spreadsheet into a format the AI can fully see — every formula, every formatting cue, every relationship between sheets.
-- **Writing:** turns the AI's response back into a real `.xlsx` file you can open, edit, and share. The AI can now hand you a corrected workbook, not just words about it.
-
-When the AI delivers you a corrected file, the file itself contains a small **review tab** explaining what the AI changed about the structure, why it made each call, what the risks are, and what your alternatives are if you'd prefer a different approach. The tool's design follows the *supervisor* model — it surfaces decisions for you to review, rather than silently making changes you'd discover later.
 
 ## Why this didn't exist before
 

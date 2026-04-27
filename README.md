@@ -2,15 +2,17 @@
 
 > 👋 **New here? Not a programmer?** → [Read WHY.md for the plain-English version](WHY.md). The README below is the technical reference.
 
-Converts spreadsheets into text, **markdown**, JSON, SQL, or schema dumps that AI coding agents can actually read.
+**The bidirectional bridge between spreadsheets and AI agents.** Reads `.xlsx` (and `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`) into the formats LLMs actually consume — markdown, JSON, text, SQL — and writes spreadsheets back out from AI-generated specs. Same tool, both directions.
 
-AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI bridges the gap.
+AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — can read text files but **not** `.xlsx` binaries. This CLI closes the loop:
+
+**📖 Read mode (default)** — turn any spreadsheet into LLM-readable output. Every formula, every named range, every merged cell, every fill color, every cross-sheet reference. No more pasting numbers and losing context.
+
+**✍️ Write mode (`xlsx-for-ai write`)** — turn an AI-generated JSON or markdown spec into a real `.xlsx` file. Closes the round-trip so an agent that *reviews* your spreadsheet can also *deliver the corrected file*. The output includes a `_xlsx-for-ai` review tab explaining every structural change the round-trip made (with risks, tradeoffs, and overrides) — the supervisor model: AI does the work, the human stays in control of every decision. Verified lossless on 29/30 real workbooks.
 
 **Input formats:** `.xlsx` `.xls` `.xlsb` `.ods` `.csv` `.tsv`
 
-**Output modes:** text dump, markdown tables (best LLM comprehension per token), JSON, SQL `CREATE TABLE`+`INSERT`, inferred schema, workbook diff.
-
-**Write mode** (`xlsx-for-ai write`): builds a real `.xlsx` from a JSON or markdown spec — closes the round-trip so an AI agent that reads a spreadsheet can also produce a corrected version. Supports formulas, formatting, merged cells, named ranges, frozen panes, and column widths. Verified lossless on 29/30 real workbooks (the one MINOR is a CRLF→LF cosmetic difference). See [`xlsx-for-ai write --help`](README.md#write-mode-xlsx-for-ai-write).
+**Output modes:** text dump, markdown tables (best LLM comprehension per token), JSON, SQL `CREATE TABLE`+`INSERT`, inferred schema, workbook diff, real `.xlsx` (write mode).
 
 It extracts everything a human would see in Excel:
 
