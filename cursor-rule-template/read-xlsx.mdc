@@ -1,10 +1,14 @@
 ---
-description: Reading and converting spreadsheets (.xlsx, .xls, .xlsb, .ods, .csv, .tsv) for AI agents
+description: Reading, writing, and converting spreadsheets (.xlsx, .xls, .xlsb, .ods, .csv, .tsv) for AI agents
 globs:
 alwaysApply: true
 ---
 
-# Reading Spreadsheet Files
+# Reading and Writing Spreadsheets
+
+This tool does both directions: read existing spreadsheets into LLM-readable text/JSON/markdown, AND build new `.xlsx` files from JSON or markdown specs.
+
+## Reading
 
 The Read tool cannot open binary spreadsheet files directly. When you need to inspect or process a spreadsheet, use `xlsx-for-ai`.
 
@@ -93,8 +97,43 @@ npx xlsx-for-ai v1.xlsx --diff v2.xlsx --stdout
 npx xlsx-for-ai dump.xlsx --stream --stdout --max-rows 1000
 ```
 
+## Writing
+
+Produce a real `.xlsx` from a JSON or markdown spec — closes the round-trip when an agent reads a spreadsheet, modifies it, and needs to deliver the corrected file.
+
+```bash
+xlsx-for-ai write spec.json                    # → spec.xlsx
+xlsx-for-ai write spec.json -o report.xlsx     # explicit output path
+cat spec.json | xlsx-for-ai write -            # spec from stdin
+```
+
+**JSON spec** — minimum (single sheet):
+```json
+{ "name": "Budget", "headers": ["Cat", "Q1"], "rows": [["Marketing", 10000]] }
+```
+
+**JSON spec** — multi-sheet with formulas:
+```json
+{
+  "sheets": [
+    { "name": "Summary", "headers": ["Region", "Total"],
+      "rows": [["North", {"formula": "=SUM(Detail!B:B)"}]] }
+  ],
+  "namedRanges": {"Totals": "Summary!B2:B5"}
+}
+```
+
+**Round-trip:** `--json` output is a valid `write` input. Read → modify → write produces an updated workbook. Verified lossless on 29/30 real workbooks tested.
+
+**Spec fields per sheet:** `name`, `headers` (optional), `rows` (or `cells` for per-cell mode), `frozen`, `columnWidths`, `numberFormat`, `merges`, `autoFilter`, `namedRanges`. Cell values can be plain literals, `{formula: "=..."}`, or `{hyperlink: "...", text: "..."}`.
+
+**v1 limitations** (intentional — document and skip):
+- Edit-in-place (rewrites the whole file; deferred to v1.5)
+- Charts, pivot tables, conditional formatting, images, macros (not written)
+- Shared formulas degrade to their cached values
+
 ## Important
 
-- Output goes to `.xlsx-read/` in the current working directory — add this to `.gitignore`.
-- For huge files, prefer `--max-tokens` over `--max-rows` if you're targeting an LLM context window — token count and row count don't correlate.
+- Read output goes to `.xlsx-read/` in the current working directory — add to `.gitignore`.
+- For huge files, prefer `--max-tokens` over `--max-rows` if targeting an LLM context window.
 - The package was previously named `cursor-reads-xlsx` — that command name still works as an alias.

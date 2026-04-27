@@ -10,6 +10,8 @@ AI tools — Claude, Cursor, Copilot, ChatGPT, and other LLM coding agents — c
 
 **Output modes:** text dump, markdown tables (best LLM comprehension per token), JSON, SQL `CREATE TABLE`+`INSERT`, inferred schema, workbook diff.
 
+**Write mode** (`xlsx-for-ai write`): builds a real `.xlsx` from a JSON or markdown spec — closes the round-trip so an AI agent that reads a spreadsheet can also produce a corrected version. Supports formulas, formatting, merged cells, named ranges, frozen panes, and column widths. Verified lossless on 29/30 real workbooks (the one MINOR is a CRLF→LF cosmetic difference). See [`xlsx-for-ai write --help`](README.md#write-mode-xlsx-for-ai-write).
+
 It extracts everything a human would see in Excel:
 
 - **Values** — strings, numbers, dates
@@ -110,6 +112,75 @@ npx xlsx-for-ai data.xlsx "Sheet1" --stdout --max-rows 50 --compact
 | `--diff OTHER` | Diff this workbook vs `OTHER` — emit changed/added/removed cells and sheets |
 | `--stream` | Streaming reader for huge `.xlsx` files (>100MB); emits row-by-row, drops some sheet metadata |
 | `-h`, `--help` | Show help |
+
+### Write mode (`xlsx-for-ai write`)
+
+The `write` sub-command produces a real `.xlsx` from a JSON or markdown spec.
+
+```bash
+xlsx-for-ai write spec.json                    # → spec.xlsx
+xlsx-for-ai write spec.json -o report.xlsx     # explicit output
+xlsx-for-ai write report.md                    # markdown table → xlsx
+cat spec.json | xlsx-for-ai write -            # stdin
+```
+
+Minimum JSON spec:
+
+```json
+{
+  "name": "Budget",
+  "headers": ["Category", "Q1", "Q2"],
+  "rows": [
+    ["Marketing", 10000, 12000],
+    ["R&D", 50000, 55000]
+  ]
+}
+```
+
+Multi-sheet, with formulas:
+
+```json
+{
+  "sheets": [
+    {
+      "name": "Summary",
+      "headers": ["Region", "Revenue", "Cost", "Profit"],
+      "rows": [
+        ["North", 100, 60, {"formula": "=B2-C2"}],
+        ["South", 200, 110, {"formula": "=B3-C3"}]
+      ],
+      "frozen": {"rowSplit": 1, "colSplit": 0}
+    },
+    {
+      "name": "Detail",
+      "headers": ["SKU", "Qty"],
+      "rows": [["A", 10], ["B", 20]]
+    }
+  ],
+  "namedRanges": {"Profits": "Summary!D2:D3"}
+}
+```
+
+**Round-trip:** the output of `xlsx-for-ai data.xlsx --json` is a valid input to `xlsx-for-ai write`, so reading then re-writing reproduces the file (verified on 29/30 real workbooks; the one MINOR is a CRLF→LF normalization in shared strings — visible content is identical).
+
+**Markdown spec:** one or more tables; `## Sheet Name` headings split into multiple sheets. Backtick-fenced cells become formulas (e.g., `` `=A1+B1` ``). Numbers, booleans, and ISO dates auto-detect.
+
+**v1 limitations:** edit-in-place (deferred to v1.5), charts, pivot tables, conditional formatting, images, macros — none of these are written. Shared formulas degrade to their cached values (formula link is lost; computed value is preserved).
+
+#### The `_xlsx-for-ai` review tab
+
+When the round-trip introduces any lossy structural changes (shared-formula degradation, line-ending normalization, etc.), `xlsx-for-ai write` adds a `_xlsx-for-ai` sheet to the output as the last tab. It's a **review note**, not just a warning list — for each issue type it explains:
+
+- **What happened** — the source structure that couldn't be preserved
+- **What we did** — the choice the tool made
+- **Risk** — what could go wrong (e.g., *"if you edit cells the formula depended on, they won't recalculate"*)
+- **Tradeoff** — what's worse about this choice vs. alternatives
+- **Alternative** — exactly what flag/source change to apply if you want different behavior
+- **Affected cells** — the specific refs, plus a full detail table at the bottom
+
+The point: the user (or an AI agent reading the file) can understand every decision the tool made and override any of them. Same shape as a code reviewer's PR comment — observation + reasoning + alternative.
+
+`--no-report` suppresses the tab if you want byte-clean output (useful for CI / round-trip tests). The `--diff` mode also ignores the `_xlsx-for-ai` tab automatically so it doesn't pollute change reports.
 
 Output files are written to `.xlsx-read/` in the current working directory.
 The path(s) are printed to stdout so your agent knows where to read.

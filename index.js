@@ -82,9 +82,13 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage: npx xlsx-for-ai <file> [sheetName] [options]
+       npx xlsx-for-ai write <spec> [-o output.xlsx]   (build .xlsx from a spec)
 
 Converts spreadsheets to text, markdown, JSON, SQL, or schema dumps that AI
 coding agents can read. Preserves values, formulas, formatting, layout.
+
+The 'write' sub-command does the reverse: takes a JSON or markdown spec and
+produces an .xlsx file. Run 'xlsx-for-ai write --help' for details.
 
 Input formats: .xlsx .xls .xlsb .ods .csv .tsv
 
@@ -233,9 +237,13 @@ function plainValue(v) {
   if (typeof v === 'object') {
     if (v.richText) return v.richText.map(r => r.text).join('');
     if (v.hyperlink) return v.text || v.hyperlink;
-    if (v.formula || v.sharedFormula) {
+    // Recognize all four shapes formulas can take in our pipeline:
+    // ExcelJS read: {formula, result} or {sharedFormula, result}
+    // --json output: {formula, result} or {sharedFormulaRef, result}
+    if (v.formula || v.sharedFormula || v.sharedFormulaRef) {
       const r = v.result;
       if (r == null) return null;
+      if (r instanceof Date) return r.toISOString().slice(0, 10);
       if (typeof r === 'object') {
         if (r.error) return `#${r.error}`;
         if (r.richText) return r.richText.map(x => x.text).join('');
@@ -810,8 +818,11 @@ function evaluateWorkbook(wb) {
 
 function diffWorkbooks(wbA, wbB, opts = {}) {
   const out = [];
-  const sheetsA = new Map(wbA.worksheets.map(s => [s.name, s]));
-  const sheetsB = new Map(wbB.worksheets.map(s => [s.name, s]));
+  // Skip the tool's own report tab — it's metadata, not user data, so it
+  // shouldn't show up as "added" or "changed" in user-facing diffs.
+  const isReport = (name) => name === '_xlsx-for-ai';
+  const sheetsA = new Map(wbA.worksheets.filter(s => !isReport(s.name)).map(s => [s.name, s]));
+  const sheetsB = new Map(wbB.worksheets.filter(s => !isReport(s.name)).map(s => [s.name, s]));
   const allNames = new Set([...sheetsA.keys(), ...sheetsB.keys()]);
 
   for (const name of allNames) {
@@ -988,8 +999,642 @@ function listSheets(wb) {
 // Main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Write mode (#8) — JSON/markdown spec → .xlsx
+//
+// V1 scope: create-from-scratch only. Edit-in-place is deferred (ExcelJS would
+// need to round-trip every detail of an existing file, which it doesn't do
+// faithfully — that's a separate effort using xlsx-populate or a patch engine).
+//
+// Accepted inputs:
+//   - JSON: strict subset of our --json output (round-trips). Either a
+//     single-sheet object or {sheets: [...]} for multi-sheet.
+//   - Markdown: one or more tables; "## Sheet Name" headings split into
+//     multiple sheets. No headings = single sheet.
+//   - '-' as the spec path: read spec from stdin (format auto-detected).
+// ---------------------------------------------------------------------------
+
+function parseWriteArgs(argv) {
+  const opts = { positional: [], output: null, noReport: false, help: false };
+  let i = 0;
+  while (i < argv.length) {
+    const a = argv[i];
+    if      (a === '-h' || a === '--help')    opts.help = true;
+    else if (a === '-o' || a === '--output')  opts.output = argv[++i];
+    else if (a === '--no-report')             opts.noReport = true;
+    else                                        opts.positional.push(a);
+    i++;
+  }
+  return opts;
+}
+
+function printWriteHelp() {
+  console.log(`Usage: xlsx-for-ai write <spec> [-o output.xlsx]
+
+Builds an .xlsx file from a spec. Spec formats:
+  - JSON     — strict subset of xlsx-for-ai's --json output (round-trips)
+  - Markdown — one or more tables; "## Sheet Name" headings split sheets
+  - '-'      — read spec from stdin (format auto-detected by first non-blank char)
+
+Options:
+  -o, --output PATH   Output xlsx path (default: <spec basename>.xlsx)
+  --no-report         Suppress the "_xlsx-for-ai" review tab (advanced; for
+                      pipelines that want byte-clean output without metadata)
+  -h, --help          Show this help
+
+Examples:
+  xlsx-for-ai write spec.json
+  xlsx-for-ai write spec.json -o report.xlsx
+  xlsx-for-ai write report.md
+  cat spec.json | xlsx-for-ai write -
+
+JSON spec — minimum (single sheet):
+  {
+    "name": "Budget",
+    "headers": ["Category", "Q1", "Q2"],
+    "rows": [
+      ["Marketing", 10000, 12000],
+      ["R&D", 50000, 55000]
+    ]
+  }
+
+JSON spec — multi-sheet:
+  { "sheets": [ {...}, {...} ], "namedRanges": {"Totals": "Sheet1!B2:C5"} }
+
+JSON spec — formulas:
+  rows can include { "formula": "=SUM(B2:B5)" } in place of a literal value.
+  cells can be specified explicitly: { "cells": [{ "ref": "B6", "value": {"formula": "=SUM(B2:B5)"} }] }
+
+Optional fields per sheet: numberFormat, columnWidths, frozen, merges, autoFilter.
+
+Not supported in v1: edit-in-place, charts, pivot tables, conditional formatting,
+images, macros. Use a sidecar instructions file for those for now.`);
+}
+
+// Strip a string for value coercion: "42" → 42, "true" → true, "2026-04-27" → Date.
+function coerceMarkdownValue(c) {
+  if (c == null || c === '') return null;
+  // Backtick-fenced formula: `=SUM(A1:A10)`
+  const fm = /^`\s*(=.+?)\s*`$/.exec(c);
+  if (fm) return { formula: fm[1].replace(/^=/, '') };
+  if (/^-?\d+$/.test(c)) return parseInt(c, 10);
+  if (/^-?\d+\.\d+$/.test(c)) return parseFloat(c);
+  if (/^(true|false)$/i.test(c)) return /^true$/i.test(c);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return new Date(c);
+  return c.replace(/\\\|/g, '|');
+}
+
+function parseMarkdownSpec(text) {
+  // Walk the doc, accumulating lines per "## Heading" section. Each section
+  // that contains a markdown table becomes a sheet.
+  const sections = [];
+  let currentName = null;
+  let currentLines = [];
+  for (const line of text.split('\n')) {
+    const m = /^##\s+(.+?)\s*$/.exec(line);
+    if (m) {
+      if (currentLines.some(l => l.trim().startsWith('|'))) {
+        sections.push({ name: currentName, lines: currentLines });
+      }
+      currentName = m[1];
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  if (currentLines.some(l => l.trim().startsWith('|'))) {
+    sections.push({ name: currentName, lines: currentLines });
+  }
+  if (sections.length === 0) {
+    throw new Error('No markdown table found in input');
+  }
+
+  const sheets = sections.map(({ name, lines }, idx) => {
+    const tableLines = lines
+      .map(l => l.trim())
+      .filter(l => l.startsWith('|') && l.endsWith('|'));
+    if (tableLines.length < 2) {
+      throw new Error(`Sheet "${name || `Sheet${idx+1}`}": no markdown table found`);
+    }
+    const cells = tableLines.map(l =>
+      l.slice(1, -1).split(/(?<!\\)\|/).map(c => c.trim())
+    );
+    const sepIdx = cells.findIndex(row =>
+      row.length > 0 && row.every(c => /^:?-+:?$/.test(c))
+    );
+    if (sepIdx < 1) throw new Error(`Sheet "${name || `Sheet${idx+1}`}": missing markdown header separator`);
+    const headers = cells[sepIdx - 1];
+    const rows = cells.slice(sepIdx + 1).map(row =>
+      row.map(c => coerceMarkdownValue(c))
+    );
+    return { name: name || `Sheet${idx+1}`, headers, rows };
+  });
+
+  return { sheets };
+}
+
+function validateSpec(spec) {
+  if (!spec || typeof spec !== 'object') throw new Error('Spec must be an object');
+  // Single-sheet shortcut: top-level looks like a sheet → wrap.
+  if ((Array.isArray(spec.rows) || Array.isArray(spec.cells)) && !Array.isArray(spec.sheets)) {
+    spec = { sheets: [spec] };
+  }
+  // Array form (--json output for multi-sheet) → wrap.
+  if (Array.isArray(spec)) {
+    spec = { sheets: spec };
+  }
+  if (!Array.isArray(spec.sheets) || spec.sheets.length === 0) {
+    throw new Error('Spec needs at least one sheet (top-level "sheets" array, or single-sheet "rows"/"cells")');
+  }
+  const names = new Set();
+  for (const s of spec.sheets) {
+    if (!s.name) throw new Error('Each sheet needs a "name"');
+    if (names.has(s.name)) throw new Error(`Duplicate sheet name: "${s.name}"`);
+    names.add(s.name);
+    if (!Array.isArray(s.rows) && !Array.isArray(s.cells)) {
+      throw new Error(`Sheet "${s.name}": needs "rows" array or "cells" array`);
+    }
+    if (Array.isArray(s.rows) && !Array.isArray(s.headers)) {
+      // headers are optional; if absent, first row is treated as data.
+      // No error.
+    }
+  }
+  return spec;
+}
+
+function trySimpleEval(formula) {
+  const f = formula.replace(/^=/, '');
+  const m = /^([A-Z]+)\(([^()]+)\)$/i.exec(f);
+  if (!m) return null;
+  const fn = m[1].toUpperCase();
+  const args = m[2].split(',').map(s => parseFloat(s));
+  if (!args.every(Number.isFinite)) return null;
+  const fjs = lazyFormulaJs();
+  if (typeof fjs[fn] !== 'function') return null;
+  try { return fjs[fn](...args); } catch (_) { return null; }
+}
+
+// JSON serialization turns Date instances into ISO strings, so on the way back
+// in from a spec we re-coerce ISO-shaped strings to Date — but only the shapes
+// that JSON.stringify(Date) actually produces. The signature of a Date-derived
+// string is the trailing Z (UTC); user-typed timestamp strings typically carry
+// a timezone offset like "-07:00", so we leave those alone.
+function coerceMaybeDate(v) {
+  if (typeof v !== 'string') return v;
+  // Pure date: "2019-01-01"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? v : d;
+  }
+  // ISO with explicit UTC Z (what JSON.stringify(Date) produces for any Date)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(v)) {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? v : d;
+  }
+  return v;
+}
+
+function buildCellValue(v, lossyOut) {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'object') {
+    if (v.formula) {
+      const out = { formula: v.formula.replace(/^=/, '') };
+      if (v.result !== undefined) out.result = coerceMaybeDate(v.result);
+      else {
+        const r = trySimpleEval(v.formula);
+        if (r != null) out.result = r;
+      }
+      return out;
+    }
+    // Shared-formula followers: --json output emits these as
+    // { sharedFormulaRef: "B5", result: <cached> }. ExcelJS can't reconstruct
+    // a shared-formula follower from just a ref (it'd need the master expression
+    // and relative-reference shifting). Pragmatic v1 behavior: degrade to the
+    // cached result as a plain value. The cell's displayed value is preserved;
+    // the formula link is lost.
+    if (v.sharedFormulaRef || v.sharedFormula) {
+      if (lossyOut) lossyOut.sharedFormula = (lossyOut.sharedFormula || 0) + 1;
+      if (v.result === undefined) return null;
+      return coerceMaybeDate(v.result);
+    }
+    if (v.hyperlink) {
+      return { text: v.text || v.hyperlink, hyperlink: v.hyperlink };
+    }
+    return v;
+  }
+  // CRLF-in-string detection: ExcelJS normalizes \r\n → \n in shared-string
+  // serialization. Visible content unchanged, but worth warning so users with
+  // byte-exact pipelines aren't surprised.
+  if (typeof v === 'string' && v.includes('\r') && lossyOut) {
+    lossyOut.crlf = (lossyOut.crlf || 0) + 1;
+  }
+  return coerceMaybeDate(v);
+}
+
+function applyCellStyle(cell, c) {
+  if (c.numFmt) cell.numFmt = c.numFmt;
+  if (c.bold || c.italic || c.color) {
+    cell.font = {};
+    if (c.bold)   cell.font.bold = true;
+    if (c.italic) cell.font.italic = true;
+    if (c.color)  cell.font.color = { argb: c.color };
+  }
+  if (c.fill) {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c.fill } };
+  }
+  if (c.align) {
+    cell.alignment = { horizontal: c.align };
+  }
+}
+
+function applyNumberFormat(ws, ref, fmt) {
+  // "A:A" or "A:D" — whole columns
+  const colMatch = /^([A-Z]+):([A-Z]+)$/i.exec(ref);
+  if (colMatch) {
+    const c1 = colNum(colMatch[1]);
+    const c2 = colNum(colMatch[2]);
+    for (let c = c1; c <= c2; c++) ws.getColumn(c).numFmt = fmt;
+    return;
+  }
+  if (ref.includes(':')) {
+    const r = parseRange(ref);
+    for (let row = r.startRow; row <= r.endRow; row++) {
+      for (let col = r.startCol; col <= r.endCol; col++) {
+        ws.getCell(`${colLetter(col)}${row}`).numFmt = fmt;
+      }
+    }
+  } else {
+    ws.getCell(ref).numFmt = fmt;
+  }
+}
+
+function buildWorkbook(spec) {
+  const wb = new ExcelJS.Workbook();
+  const warnings = []; // [{type, sheet, ref}, ...]
+
+  function track(sheetName, ref, lossy) {
+    if (lossy.sharedFormula) warnings.push({ type: 'sharedFormula', sheet: sheetName, ref });
+    if (lossy.crlf)          warnings.push({ type: 'crlf',          sheet: sheetName, ref });
+  }
+
+  for (const sheet of spec.sheets) {
+    const ws = wb.addWorksheet(sheet.name);
+
+    if (sheet.frozen) {
+      ws.views = [{
+        state: 'frozen',
+        xSplit: sheet.frozen.colSplit ?? sheet.frozen.xSplit ?? 0,
+        ySplit: sheet.frozen.rowSplit ?? sheet.frozen.ySplit ?? 0,
+      }];
+    }
+
+    if (sheet.columnWidths && typeof sheet.columnWidths === 'object') {
+      for (const [letter, width] of Object.entries(sheet.columnWidths)) {
+        try { ws.getColumn(colNum(letter)).width = width; } catch (_) {}
+      }
+    }
+
+    if (Array.isArray(sheet.cells)) {
+      // Per-cell mode (round-trip from --json). cells: [{ref, value, ...style}, ...]
+      for (const c of sheet.cells) {
+        if (!c.ref) continue;
+        const cell = ws.getCell(c.ref);
+        const lossy = {};
+        cell.value = buildCellValue(c.value, lossy);
+        track(sheet.name, c.ref, lossy);
+        applyCellStyle(cell, c);
+      }
+    } else {
+      // Tabular mode (markdown / simple JSON). headers (optional) + rows.
+      let rowIdx = 1;
+      if (Array.isArray(sheet.headers) && sheet.headers.length > 0) {
+        const hdrRow = ws.getRow(rowIdx);
+        sheet.headers.forEach((h, i) => {
+          const cell = hdrRow.getCell(i + 1);
+          cell.value = h;
+          cell.font = { bold: true };
+        });
+        rowIdx++;
+      }
+      for (const r of sheet.rows) {
+        const row = ws.getRow(rowIdx);
+        if (Array.isArray(r)) {
+          r.forEach((v, i) => {
+            const lossy = {};
+            row.getCell(i + 1).value = buildCellValue(v, lossy);
+            if (lossy.sharedFormula || lossy.crlf) {
+              track(sheet.name, `${colLetter(i+1)}${rowIdx}`, lossy);
+            }
+          });
+        } else if (r && typeof r === 'object') {
+          // Object form: { col1: val, col2: val }, keyed by header name.
+          if (Array.isArray(sheet.headers)) {
+            sheet.headers.forEach((h, i) => {
+              if (r[h] !== undefined) {
+                const lossy = {};
+                row.getCell(i + 1).value = buildCellValue(r[h], lossy);
+                if (lossy.sharedFormula || lossy.crlf) {
+                  track(sheet.name, `${colLetter(i+1)}${rowIdx}`, lossy);
+                }
+              }
+            });
+          }
+        }
+        rowIdx++;
+      }
+    }
+
+    if (sheet.numberFormat && typeof sheet.numberFormat === 'object') {
+      for (const [ref, fmt] of Object.entries(sheet.numberFormat)) {
+        try { applyNumberFormat(ws, ref, fmt); } catch (_) {}
+      }
+    }
+
+    if (Array.isArray(sheet.merges)) {
+      for (const m of sheet.merges) {
+        try { ws.mergeCells(m); } catch (_) {}
+      }
+    }
+
+    if (sheet.autoFilter) {
+      ws.autoFilter = sheet.autoFilter;
+    }
+
+    // Sheet-level named ranges (the shape --json output produces:
+    // [{name, ranges: ["Sheet1!$A$1:$D$10"]}, ...])
+    if (Array.isArray(sheet.namedRanges)) {
+      for (const nr of sheet.namedRanges) {
+        if (!nr.name || !Array.isArray(nr.ranges)) continue;
+        for (const ref of nr.ranges) {
+          try { wb.definedNames.add(ref, nr.name); } catch (_) {}
+        }
+      }
+    }
+  }
+
+  // Workbook-level named ranges (concise spec form: { "Totals": "Sheet1!B2:C5" })
+  if (spec.namedRanges && typeof spec.namedRanges === 'object' && !Array.isArray(spec.namedRanges)) {
+    for (const [name, ref] of Object.entries(spec.namedRanges)) {
+      try { wb.definedNames.add(ref, name); } catch (_) {}
+    }
+  }
+  // Workbook-level array form (also from --json)
+  if (Array.isArray(spec.namedRanges)) {
+    for (const nr of spec.namedRanges) {
+      if (!nr.name || !Array.isArray(nr.ranges)) continue;
+      for (const ref of nr.ranges) {
+        try { wb.definedNames.add(ref, nr.name); } catch (_) {}
+      }
+    }
+  }
+
+  return { wb, warnings };
+}
+
+// Per-issue review templates. Each entry follows the "supervisor leaves a
+// review note" shape: what happened, what we did, the risk, the tradeoff, and
+// how to override. Keeps the user in the decision seat.
+const REPORT_REVIEWS = {
+  sharedFormula: {
+    title: 'Shared formula degradation',
+    whatHappened:
+      "The source file used Excel's shared-formula optimization — one master cell carries the formula, follower cells reference the master. ExcelJS cannot reconstruct that link in the output file.",
+    whatWeDid:
+      'Each follower cell was replaced with its cached numeric value. You will see the same numbers in Excel as before; the formula link itself is gone.',
+    risk:
+      'If you edit any cell the original formula depended on, the previously-shared cells will not recalculate — they are now hardcoded numbers, not formulas.',
+    tradeoff:
+      'Smaller file, but the spreadsheet is "frozen": adding rows or changing inputs will not propagate the way they used to.',
+    alternative:
+      'Rerun with --fix-shared-formulas=expand (planned for v1.5). Each follower becomes an explicit per-cell formula — slightly larger file, but each cell recalculates independently like hand-written formulas. Closest behavior to the original source.',
+  },
+  crlf: {
+    title: 'CRLF → LF line-ending normalization',
+    whatHappened:
+      'The source file had Windows-style CRLF line endings (\\r\\n) inside cell text. ExcelJS normalizes these to Unix-style LF (\\n) when writing shared strings.',
+    whatWeDid:
+      'Each affected cell\'s text now uses LF instead of CRLF. Visible content is identical — Excel, Numbers, and LibreOffice render both the same way.',
+    risk:
+      'No risk to the spreadsheet content itself. Only matters if a downstream tool does byte-exact comparison or specifically processes \\r\\n (e.g., greps for Windows-encoded text).',
+    tradeoff:
+      'None visible in spreadsheet apps. The output is also marginally smaller.',
+    alternative:
+      'If your pipeline requires CRLF preservation, pre-process source strings to substitute a placeholder before extracting --json, then restore after writing. Or simply ignore — this is the most cosmetic of the round-trip artifacts.',
+  },
+};
+
+// Add a "_xlsx-for-ai" tab to the workbook with a review-style report of any
+// round-trip lossy events. Embedded in the file (not just stderr) so the
+// feedback travels with the workbook. Each issue type gets a full review note
+// (what happened, what we did, risk, tradeoff, alternative) so the user can
+// understand the decisions and override if they prefer different behavior.
+function addReportSheet(wb, warnings) {
+  if (warnings.length === 0) return;
+
+  const ws = wb.addWorksheet('_xlsx-for-ai');
+
+  // Header rows
+  ws.getCell('A1').value = 'xlsx-for-ai write report';
+  ws.getCell('A1').font = { bold: true, size: 14 };
+  ws.mergeCells('A1:D1');
+
+  ws.getCell('A2').value = `Generated ${new Date().toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+  ws.getCell('A2').font = { italic: true, color: { argb: 'FF666666' } };
+  ws.mergeCells('A2:D2');
+
+  ws.getCell('A3').value =
+    'This file passed through xlsx-for-ai write. The sections below describe what changed during the round-trip, why, and how to override if you want different behavior. Cell values you see in the rest of the workbook are correct — these notes describe structural changes (formulas, line endings, etc.) that may matter for future edits.';
+  ws.getCell('A3').font = { italic: true, color: { argb: 'FF666666' } };
+  ws.getCell('A3').alignment = { wrapText: true, vertical: 'top' };
+  ws.mergeCells('A3:D3');
+  ws.getRow(3).height = 60;
+
+  // Group warnings by type
+  const byType = {};
+  for (const w of warnings) (byType[w.type] = byType[w.type] || []).push(w);
+
+  let r = 5;
+
+  // Per-issue review block
+  for (const [type, group] of Object.entries(byType)) {
+    const review = REPORT_REVIEWS[type] || {
+      title: type,
+      whatHappened: 'Unspecified round-trip change.',
+      whatWeDid: '(no template available)',
+      risk: '(unknown)',
+      tradeoff: '(unknown)',
+      alternative: '(none)',
+    };
+
+    // Issue heading bar
+    ws.getCell(`A${r}`).value = `Issue: ${review.title}  (${group.length} cell${group.length === 1 ? '' : 's'})`;
+    ws.getCell(`A${r}`).font = { bold: true, size: 12 };
+    ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7F0F8' } };
+    ws.mergeCells(`A${r}:D${r}`);
+    r++;
+
+    const addProse = (label, body) => {
+      ws.getCell(`A${r}`).value = label;
+      ws.getCell(`A${r}`).font = { bold: true };
+      ws.getCell(`A${r}`).alignment = { vertical: 'top', wrapText: true };
+      ws.getCell(`B${r}`).value = body;
+      ws.getCell(`B${r}`).alignment = { wrapText: true, vertical: 'top' };
+      ws.mergeCells(`B${r}:D${r}`);
+      // Approximate height: ~6 chars per Excel "row unit" given an 80-char column,
+      // 15px per row unit baseline. Capped at a reasonable max.
+      const lines = Math.max(2, Math.ceil(body.length / 95));
+      ws.getRow(r).height = Math.min(lines * 15, 120);
+      r++;
+    };
+
+    addProse('What happened', review.whatHappened);
+    addProse('What we did',   review.whatWeDid);
+    addProse('Risk',          review.risk);
+    addProse('Tradeoff',      review.tradeoff);
+    addProse('Alternative',   review.alternative);
+
+    // Compact "affected cells" summary
+    const cellList = group.map(w => `${w.sheet}!${w.ref}`);
+    const cellSummary = cellList.length <= 10
+      ? cellList.join(', ')
+      : `${cellList.slice(0, 10).join(', ')}, ... and ${cellList.length - 10} more (full list at the bottom of this sheet)`;
+    addProse('Affected cells', cellSummary);
+
+    // Spacer row between issue blocks
+    r++;
+  }
+
+  // Full detail table
+  ws.getCell(`A${r}`).value = 'Full detail (one row per affected cell)';
+  ws.getCell(`A${r}`).font = { bold: true, size: 12 };
+  ws.mergeCells(`A${r}:D${r}`);
+  r++;
+
+  ws.getCell(`A${r}`).value = 'Sheet';
+  ws.getCell(`B${r}`).value = 'Cell';
+  ws.getCell(`C${r}`).value = 'Issue type';
+  ws.getCell(`D${r}`).value = 'Title';
+  ['A','B','C','D'].forEach(c => {
+    ws.getCell(`${c}${r}`).font = { bold: true };
+    ws.getCell(`${c}${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
+  });
+  r++;
+
+  const MAX_DETAIL = 1000;
+  const detailRows = warnings.slice(0, MAX_DETAIL);
+  for (const w of detailRows) {
+    ws.getCell(`A${r}`).value = w.sheet;
+    ws.getCell(`B${r}`).value = w.ref;
+    ws.getCell(`C${r}`).value = w.type;
+    ws.getCell(`D${r}`).value = (REPORT_REVIEWS[w.type] && REPORT_REVIEWS[w.type].title) || w.type;
+    r++;
+  }
+  if (warnings.length > MAX_DETAIL) {
+    ws.getCell(`A${r}`).value = `... and ${warnings.length - MAX_DETAIL} more (totals shown in the issue blocks above)`;
+    ws.getCell(`A${r}`).font = { italic: true };
+    ws.mergeCells(`A${r}:D${r}`);
+  }
+
+  // Column widths
+  ws.getColumn(1).width = 18;
+  ws.getColumn(2).width = 12;
+  ws.getColumn(3).width = 18;
+  ws.getColumn(4).width = 80;
+}
+
+function readStdinAll() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
+async function readSpecText(specPath) {
+  if (specPath === '-') return readStdinAll();
+  if (!fs.existsSync(specPath)) {
+    throw new Error(`Spec file not found: ${specPath}`);
+  }
+  return fs.readFileSync(specPath, 'utf8');
+}
+
+async function loadSpec(specPath) {
+  const text = await readSpecText(specPath);
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    let parsed;
+    try { parsed = JSON.parse(trimmed); }
+    catch (e) { throw new Error(`Spec is not valid JSON: ${e.message}`); }
+    return parsed;
+  }
+  return parseMarkdownSpec(text);
+}
+
+async function mainWrite(argv) {
+  const opts = parseWriteArgs(argv);
+  if (opts.help) { printWriteHelp(); process.exit(0); }
+  if (opts.positional.length < 1) { printWriteHelp(); process.exit(1); }
+
+  const specPath = opts.positional[0];
+
+  let spec;
+  try {
+    spec = await loadSpec(specPath);
+    spec = validateSpec(spec);
+  } catch (e) {
+    console.error(`Spec error: ${e.message}`);
+    process.exit(1);
+  }
+
+  let wb, warnings;
+  try {
+    ({ wb, warnings } = buildWorkbook(spec));
+  } catch (e) {
+    console.error(`Build error: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Embed a review-style report tab in the file when there are round-trip
+  // warnings, so the feedback travels with the workbook for the human or agent
+  // that opens it. `--no-report` suppresses for pipelines that don't want the
+  // extra sheet (e.g. round-trip CI tests).
+  if (!opts.noReport) {
+    addReportSheet(wb, warnings);
+  }
+
+  let outPath = opts.output;
+  if (!outPath) {
+    if (specPath === '-') outPath = 'output.xlsx';
+    else outPath = path.basename(specPath, path.extname(specPath)) + '.xlsx';
+  }
+  outPath = path.resolve(outPath);
+
+  try {
+    await wb.xlsx.writeFile(outPath);
+  } catch (e) {
+    console.error(`Write error: ${e.message}`);
+    process.exit(1);
+  }
+  console.log(outPath);
+  if (warnings.length > 0) {
+    console.error(`note: ${warnings.length} round-trip warning(s) written to '_xlsx-for-ai' sheet in the output.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // Sub-command dispatch
+  if (argv[0] === 'write') return mainWrite(argv.slice(1));
+
+  const opts = parseArgs(argv);
 
   if (opts.help) { printHelp(); process.exit(0); }
   if (opts.positional.length < 1) { printHelp(); process.exit(1); }
