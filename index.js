@@ -599,6 +599,23 @@ function dumpSheetJSON(ws, wb, opts = {}) {
     if (col.hidden) out.hiddenColumns.push(letter);
     out.columns.push({ letter, width: col.width || null, hidden: !!col.hidden });
   }
+  // Some xlsx files set widths on columns past the populated range (e.g.,
+  // columns reserved for future data, or styling-only columns). ExcelJS's
+  // columnCount stops at populated cells, so a naive loop misses those widths
+  // and they silently drop on round-trip. Walk ws.columns directly to pick up
+  // any column metadata beyond endCol.
+  try {
+    const allCols = ws.columns || [];
+    for (let i = endCol; i < allCols.length; i++) {
+      const col = allCols[i];
+      if (!col) continue;
+      if (col.width != null || col.hidden) {
+        const letter = colLetter(i + 1);
+        if (col.hidden) out.hiddenColumns.push(letter);
+        out.columns.push({ letter, width: col.width || null, hidden: !!col.hidden });
+      }
+    }
+  } catch (_) {}
 
   if (ws.autoFilter) out.autoFilter = typeof ws.autoFilter === 'string' ? ws.autoFilter : (ws.autoFilter.ref || null);
   try { if (ws.pageSetup?.printArea) out.printArea = ws.pageSetup.printArea; } catch (_) {}
@@ -1294,6 +1311,20 @@ function buildWorkbook(spec) {
         try { ws.getColumn(colNum(letter)).width = width; } catch (_) {}
       }
     }
+    // Also read widths from the `columns` array — that's the shape `--json`
+    // output produces (`columns: [{letter, width, hidden}, ...]`). Without
+    // this, round-tripping a workbook through `--json` → `write` silently
+    // dropped all column widths, breaking the documented round-trip claim.
+    if (Array.isArray(sheet.columns)) {
+      for (const col of sheet.columns) {
+        if (!col || !col.letter) continue;
+        try {
+          const c = ws.getColumn(colNum(col.letter));
+          if (col.width != null) c.width = col.width;
+          if (col.hidden) c.hidden = true;
+        } catch (_) {}
+      }
+    }
 
     if (Array.isArray(sheet.cells)) {
       // Per-cell mode (round-trip from --json). cells: [{ref, value, ...style}, ...]
@@ -1630,6 +1661,13 @@ async function mainWrite(argv) {
 
 async function main() {
   const argv = process.argv.slice(2);
+
+  // --version / -v: short-circuit before any file parsing so users can ask
+  // the version without it being treated as a filename. Mirrors --help.
+  if (argv[0] === '--version' || argv[0] === '-v') {
+    console.log(require('./package.json').version);
+    process.exit(0);
+  }
 
   // Sub-command dispatch
   if (argv[0] === 'write') return mainWrite(argv.slice(1));
