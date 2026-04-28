@@ -1,6 +1,6 @@
 {
   "name": "xlsx-for-ai",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "CLI that converts .xlsx files into rich text or JSON dumps that AI coding agents (Claude, Cursor, Copilot, ChatGPT, etc.) can read — preserving values, formulas, formatting, colors, column widths, frozen panes, named ranges, tables, and more.",
   "main": "index.js",
   "bin": {
@@ -47,5 +47,17 @@
     "gpt-tokenizer": "^3.4.0",
     "papaparse": "^5.5.3",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
+  },
+  "scripts": {
+    "postinstall": "patch-package"
+  },
+  "overrides": {
+    "glob": "^13.0.0",
+    "rimraf": "^5.0.10",
+    "unzipper": "^0.12.3",
+    "fast-csv": "^5.0.2"
   }
 }
