@@ -1,0 +1,178 @@
+/* Minimal functional styling. Functional > pretty for v0. */
+
+:root {
+  --fg: #1f2937;
+  --muted: #6b7280;
+  --bg: #f9fafb;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --success: #065f46;
+  --success-bg: #d1fae5;
+  --error: #991b1b;
+  --error-bg: #fee2e2;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+.tagline {
+  color: var(--muted);
+  margin: 0;
+}
+
+.upload-zone {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+#upload-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.file-input-label {
+  flex: 1;
+  min-width: 200px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  background: var(--bg);
+}
+
+.file-input-label:hover {
+  border-color: var(--accent);
+}
+
+.file-input-text {
+  color: var(--muted);
+}
+
+input[type="file"] {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+button:hover { background: var(--accent-hover); }
+
+.htmx-indicator {
+  display: none;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border-radius: 6px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.htmx-request .htmx-indicator { display: block; }
+.htmx-request.htmx-indicator { display: block; }
+
+#result { margin-top: 1rem; }
+
+.result-success {
+  background: var(--success-bg);
+  color: var(--success);
+  padding: 1rem;
+  border-radius: 6px;
+}
+
+.result-error {
+  background: var(--error-bg);
+  color: var(--error);
+  padding: 1rem;
+  border-radius: 6px;
+}
+
+.issue-summary {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.download-btn {
+  display: inline-block;
+  background: var(--success);
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+
+code {
+  background: var(--bg);
+  padding: 0.125rem 0.25rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.info {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  color: var(--muted);
+}
+
+.info h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.5rem;
+  color: var(--fg);
+}
+
+.info p {
+  margin: 0 0 0.5rem;
+}
+
+.info p:last-child {
+  margin-bottom: 0;
+}

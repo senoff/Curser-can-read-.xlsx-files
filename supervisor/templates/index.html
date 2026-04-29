@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xlsx-supervisor</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>xlsx-supervisor</h1>
+      <p class="tagline">Drop a spreadsheet. Get back a corrected version with a review tab.</p>
+    </header>
+
+    <section class="upload-zone">
+      <form
+        id="upload-form"
+        hx-post="/upload-form"
+        hx-encoding="multipart/form-data"
+        hx-target="#result"
+        hx-swap="innerHTML"
+        hx-indicator="#spinner"
+      >
+        <label class="file-input-label" for="file">
+          <span class="file-input-text">Choose an .xlsx file…</span>
+          <input id="file" type="file" name="file" accept=".xlsx,.xlsm" required>
+        </label>
+        <button type="submit">Review</button>
+      </form>
+
+      <div id="spinner" class="htmx-indicator">
+        <p>Reviewing…</p>
+      </div>
+
+      <div id="result"></div>
+    </section>
+
+    <section class="info">
+      <h2>What this does</h2>
+      <p>
+        Uploads your spreadsheet, runs structural checks (formula errors,
+        broken cross-sheet references, hidden data, external links), and
+        returns a copy of the file with a <code>_xlsx-for-ai</code> tab
+        explaining each finding — what we found, what's at risk, and how
+        to fix it.
+      </p>
+      <p>
+        We don't store your file. Files are processed in memory and
+        deleted within an hour.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

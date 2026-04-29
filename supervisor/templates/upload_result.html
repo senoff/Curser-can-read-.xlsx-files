@@ -1,0 +1,15 @@
+<div class="result-success">
+  <h3>Review complete</h3>
+  <p><strong>{{ result.filename }}</strong> — {{ result.issue_count }} issue{{ "s" if result.issue_count != 1 else "" }} found.</p>
+
+  {% if result.by_type %}
+    <ul class="issue-summary">
+      {% for type, count in result.by_type.items() %}
+        <li><code>{{ type }}</code>: {{ count }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <p><a class="download-btn" href="{{ result.download_url }}" download>Download reviewed file</a></p>
+  <p class="hint">The download includes a <code>_xlsx-for-ai</code> tab with full review details.</p>
+</div>

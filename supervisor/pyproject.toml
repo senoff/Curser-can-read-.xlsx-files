@@ -1,0 +1,28 @@
+[project]
+name = "xlsx-supervisor"
+version = "0.0.1"
+description = "AI spreadsheet supervisor — upload xlsx, get back a corrected file with a review tab"
+authors = [{ name = "senoff" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi >= 0.115",
+    "uvicorn[standard] >= 0.32",
+    "python-multipart >= 0.0.12",  # for FastAPI file uploads
+    "jinja2 >= 3.1",                # for HTML templates
+    "openpyxl >= 3.1.5",            # xlsx read
+    "xlsxwriter >= 3.2.0",          # xlsx write
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 8.0",
+    "httpx >= 0.27",                # for FastAPI test client
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
