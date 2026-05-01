@@ -293,6 +293,29 @@ curl -o .cursor/rules/read-xlsx.mdc https://raw.githubusercontent.com/senoff/xls
 
 The same rule works for Claude Code (`.claude/rules/`), Copilot (`.github/copilot-instructions.md`), or any other agent — just adjust the path.
 
+## Embedding xlsx-for-ai as a library dependency
+
+The CLI install (`npm install -g xlsx-for-ai`) is clean — no deprecation warnings, modern transitive deps via npm `overrides`. If you embed xlsx-for-ai as a library dependency in another project, the picture is slightly different.
+
+**Why:** npm's `overrides` field only takes effect when xlsx-for-ai is the top-level project. When xlsx-for-ai is installed as a *transitive* dependency in another project, npm uses the original ExcelJS dep tree (unmodified), and you'll see the upstream ExcelJS deprecation warnings on install. The warnings come from ExcelJS's stale transitive deps (`glob@7`, `rimraf@2`, `lodash.isequal`, `fstream`, `inflight`) and are upstream noise — they don't affect functionality.
+
+**To get clean output in a project that depends on xlsx-for-ai**, copy the same overrides into your own `package.json`:
+
+```json
+{
+  "overrides": {
+    "glob": "^13.0.0",
+    "rimraf": "^5.0.10",
+    "unzipper": "^0.12.3",
+    "fast-csv": "^5.0.2"
+  }
+}
+```
+
+Run `rm -rf node_modules package-lock.json && npm install` and the warnings will clear. xlsx-for-ai's tests pass against these versions, so the upgrade is safe.
+
+A future release may apply these dep upgrades via `patch-package` so they travel through the dep graph automatically. The infrastructure is in place; the patches haven't been needed urgently because most installs are CLI-direct.
+
 ## Why This Exists
 
 Spreadsheets are everywhere in real projects — financial models, data exports, config files, tax estimates. AI coding agents choke on binary formats. This tool makes spreadsheets legible to AI with zero information loss, including the tricky bits like shared formulas, named ranges, and merged cells that other tools drop.

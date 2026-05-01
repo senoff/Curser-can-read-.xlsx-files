@@ -21,7 +21,10 @@ if (!process.env.XLSX_FOR_AI_RESPAWNED) {
 
 const path = require('path');
 const fs   = require('fs');
-const ExcelJS = require('exceljs');
+// All xlsx-engine access goes through the engine abstraction in lib/engine.js
+// — never require('exceljs') directly. To swap engines (fork, different
+// library, server-side service), replace lib/engine.js. Nothing else changes.
+const engine = require('./lib/engine');
 
 // Lazy-load heavy deps only when their feature is used (keeps cold start fast
 // for the common --stdout / --json / --md path that needs none of them).
@@ -353,7 +356,7 @@ function dumpSheet(ws, wb, opts = {}) {
     lines.push(`(${ws.columnCount - endCol} more columns truncated)`);
   }
 
-  const merges = Object.keys(ws._merges || {});
+  const merges = (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges : [];
   if (merges.length) lines.push(`Merged: ${merges.join(', ')}`);
 
   if (ws.autoFilter) {
@@ -413,7 +416,7 @@ function dumpSheet(ws, wb, opts = {}) {
       if (raw == null || raw === '') continue;
       const ref = `${colLetter(c)}${r}`;
       const tags = [];
-      if (cell.type === ExcelJS.ValueType.Formula && typeof raw === 'object') {
+      if (cell.type === engine.ValueType.Formula && typeof raw === 'object') {
         if (raw.formula) tags.push(`formula: =${raw.formula}`);
         else if (raw.sharedFormula) tags.push(`shared formula ref: ${raw.sharedFormula}`);
       }
@@ -480,7 +483,7 @@ function dumpSheetMarkdown(ws, wb, opts = {}) {
   meta.push(`Total: ${ws.rowCount} rows × ${ws.columnCount} cols`);
   const frozen = (ws.views || []).find(v => v.state === 'frozen');
   if (frozen) meta.push(`Frozen: row ${frozen.ySplit ?? 0}, col ${frozen.xSplit ?? 0}`);
-  const merges = Object.keys(ws._merges || {});
+  const merges = (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges : [];
   if (merges.length) meta.push(`Merged: ${merges.slice(0, 6).join(', ')}${merges.length > 6 ? ', ...' : ''}`);
   const namedRanges = getNamedRanges(wb, ws.name);
   if (namedRanges.length) meta.push(`Named ranges: ${namedRanges.map(n => n.name).join(', ')}`);
@@ -582,7 +585,7 @@ function dumpSheetJSON(ws, wb, opts = {}) {
     columns: [],
     hiddenColumns: [],
     hiddenRows: [],
-    merges: Object.keys(ws._merges || {}),
+    merges: (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges.slice() : [],
     autoFilter: null,
     printArea: null,
     namedRanges: getNamedRanges(wb, ws.name),
@@ -904,12 +907,10 @@ function applyTokenBudget(text, maxTokens) {
 async function loadAnyWorkbook(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.xlsx') {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(filePath);
-    return wb;
+    return engine.loadWorkbook(filePath);
   }
   if (ext === '.csv' || ext === '.tsv') {
-    const wb = new ExcelJS.Workbook();
+    const wb = engine.createWorkbook();
     const ws = wb.addWorksheet(path.basename(filePath, ext));
     const text = fs.readFileSync(filePath, 'utf8');
     const papa = lazyPapa();
@@ -924,13 +925,13 @@ async function loadAnyWorkbook(filePath) {
   throw new Error(`Unsupported extension: ${ext}. Supported: .xlsx .xls .xlsb .ods .csv .tsv`);
 }
 
-// Read a non-xlsx spreadsheet via SheetJS, materialize into an ExcelJS
-// Workbook so the rest of the code (dump/markdown/json/sql/schema) works
-// unchanged. Loses some formatting; preserves values + formulas.
+// Read a non-xlsx spreadsheet via SheetJS, materialize into the engine's
+// workbook representation so the rest of the code (dump/markdown/json/sql/
+// schema) works unchanged. Loses some formatting; preserves values + formulas.
 function loadViaSheetJS(filePath) {
   const XLSX = lazyXlsx();
   const sheetJsWb = XLSX.readFile(filePath, { cellFormula: true, cellDates: true });
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   for (const name of sheetJsWb.SheetNames) {
     const sjsSheet = sheetJsWb.Sheets[name];
     const ws = wb.addWorksheet(name);
@@ -961,7 +962,7 @@ function loadViaSheetJS(filePath) {
 // ---------------------------------------------------------------------------
 
 async function streamDump(filePath, opts) {
-  const wb = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+  const wb = engine.streamReader(filePath, {
     sharedStrings: 'cache',
     hyperlinks: 'ignore',
     worksheets: 'emit',
@@ -1289,7 +1290,7 @@ function applyNumberFormat(ws, ref, fmt) {
 }
 
 function buildWorkbook(spec) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const warnings = []; // [{type, sheet, ref}, ...]
 
   function track(sheetName, ref, lossy) {
@@ -1657,7 +1658,7 @@ async function mainWrite(argv) {
   outPath = path.resolve(outPath);
 
   try {
-    await wb.xlsx.writeFile(outPath);
+    await engine.writeWorkbook(wb, outPath);
   } catch (e) {
     console.error(`Write error: ${e.message}`);
     process.exit(1);
@@ -1877,11 +1878,50 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  const msg = err && err.message ? err.message : String(err);
-  console.error(msg);
-  if (/Invalid string length/i.test(msg)) {
-    console.error('Hint: this sheet renders to a text dump larger than V8\'s 512MB string limit. Try --max-rows N, --max-cols N, --max-tokens N, --range A1:..., or --stream.');
-  }
-  process.exit(1);
-});
+// Run as CLI when invoked directly. Skip when imported so tests can require
+// this module and exercise its internals without triggering main().
+if (require.main === module) {
+  main().catch((err) => {
+    const msg = err && err.message ? err.message : String(err);
+    console.error(msg);
+    if (/Invalid string length/i.test(msg)) {
+      console.error('Hint: this sheet renders to a text dump larger than V8\'s 512MB string limit. Try --max-rows N, --max-cols N, --max-tokens N, --range A1:..., or --stream.');
+    }
+    process.exit(1);
+  });
+}
+
+// Export internals for unit tests. Production CLI use never touches these
+// exports — this is only for `require('./index.js')` in test files.
+module.exports = {
+  // arg parsing
+  parseArgs,
+  parseWriteArgs,
+  // pure utilities
+  colLetter,
+  colNum,
+  parseRange,
+  isDefaultTextColor,
+  describeFill,
+  describeFont,
+  formatValue,
+  plainValue,
+  jsonValue,
+  describeNote,
+  escapeMd,
+  coerceMaybeDate,
+  coerceMarkdownValue,
+  // schema/format
+  inferType,
+  sqlIdent,
+  sqlVal,
+  // spec parsing
+  parseMarkdownSpec,
+  validateSpec,
+  buildCellValue,
+  // workbook builders
+  buildWorkbook,
+  trySimpleEval,
+  // budget
+  applyTokenBudget,
+};
