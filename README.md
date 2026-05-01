@@ -327,7 +327,7 @@ Writes `<input>-redacted.xlsx` next to the input. Every cell value is replaced b
 | Number             | `0`         |
 | String             | `"x"`       |
 | Boolean            | `false`     |
-| ISO date           | `1900-01-01`|
+| ISO date           | `1899-12-30`|
 | Error              | preserved   |
 
 Formulas, sheet names, merges, named ranges (formulas), styles, conditional formatting, pivots, charts, queries, and macros are passed through byte-for-byte at the ZIP/XML level (no lossy ExcelJS round-trip). Shared strings and comment payloads are also rewritten to `"x"` for defense-in-depth. Open the redacted file in Excel to confirm it still triggers the bug, then attach it.
