@@ -17,7 +17,7 @@ name: publish
 #   - npm: package MFA = automation (`npm access set mfa=automation xlsx-for-ai`)
 #   - npm: granular access token, scope = "Read and Publish" on xlsx-for-ai,
 #          type = automation (the "bypass 2FA" checkbox in the UI)
-#   - GitHub repo: Secrets and variables → Actions → NPM_TOKEN = the granular token
+#   - GitHub repo: Secrets and variables → Actions → XLSX_NPM = the granular token
 #
 # Without ALL of {account-mode, package-mfa, automation-token}, npm will
 # reject the publish with EOTP even when the token claims to bypass.
@@ -115,7 +115,7 @@ jobs:
         if: github.event_name == 'push' || inputs.dry_run == false
         run: npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
 
       - name: Push version-bump commit + tag
         if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none' && inputs.dry_run == false
