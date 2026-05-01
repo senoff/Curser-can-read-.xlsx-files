@@ -133,8 +133,10 @@ If the lockfile changed in one of those PRs, find out why before merging.
 
 - `.github/workflows/audit.yml`
 - `.github/workflows/upgrade-verify.yml`
-- the prepublish flow (`npm install /tmp/xfa` clean-install test)
-- any release script
+- any release script we add later (there is no automated prepublish flow
+  today — releases are cut by hand via `npm publish` from a clean checkout
+  and the maintainer is responsible for running the local check below
+  beforehand)
 
 If you want a local check that mirrors CI:
 
