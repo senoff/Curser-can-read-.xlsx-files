@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test test/round-trip.test.js test/output-matrix.test.js test/unit/*.test.js"
   },
   "keywords": [
     "xlsx",
@@ -48,16 +48,13 @@
   },
   "dependencies": {
     "@formulajs/formulajs": "^4.6.0",
-    "exceljs": "^4.4.0",
+    "@protobi/exceljs": "^4.4.0-protobi.9",
     "gpt-tokenizer": "^3.4.0",
     "papaparse": "^5.5.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "patch-package": "^8.0.1"
-  },
-  "scripts": {
-    "test": "node --test test/round-trip.test.js test/output-matrix.test.js test/unit/*.test.js"
   },
   "overrides": {
     "glob": "^13.0.0",

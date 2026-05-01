@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const JSZip = require('jszip');
-const ExcelJS = require('exceljs');
+const ExcelJS = require('@protobi/exceljs');
 
 const { build } = require('./fixtures/build');
 const { exportRedactedWorkbook } = require('../lib/redactWorkbook');
