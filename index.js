@@ -21,7 +21,10 @@ if (!process.env.XLSX_FOR_AI_RESPAWNED) {
 
 const path = require('path');
 const fs   = require('fs');
-const ExcelJS = require('exceljs');
+// All xlsx-engine access goes through the engine abstraction in lib/engine.js
+// — never require('exceljs') directly. To swap engines (fork, different
+// library, server-side service), replace lib/engine.js. Nothing else changes.
+const engine = require('./lib/engine');
 
 // Lazy-load heavy deps only when their feature is used (keeps cold start fast
 // for the common --stdout / --json / --md path that needs none of them).
@@ -413,7 +416,7 @@ function dumpSheet(ws, wb, opts = {}) {
       if (raw == null || raw === '') continue;
       const ref = `${colLetter(c)}${r}`;
       const tags = [];
-      if (cell.type === ExcelJS.ValueType.Formula && typeof raw === 'object') {
+      if (cell.type === engine.ValueType.Formula && typeof raw === 'object') {
         if (raw.formula) tags.push(`formula: =${raw.formula}`);
         else if (raw.sharedFormula) tags.push(`shared formula ref: ${raw.sharedFormula}`);
       }
@@ -902,12 +905,10 @@ function applyTokenBudget(text, maxTokens) {
 async function loadAnyWorkbook(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.xlsx') {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(filePath);
-    return wb;
+    return engine.loadWorkbook(filePath);
   }
   if (ext === '.csv' || ext === '.tsv') {
-    const wb = new ExcelJS.Workbook();
+    const wb = engine.createWorkbook();
     const ws = wb.addWorksheet(path.basename(filePath, ext));
     const text = fs.readFileSync(filePath, 'utf8');
     const papa = lazyPapa();
@@ -922,13 +923,13 @@ async function loadAnyWorkbook(filePath) {
   throw new Error(`Unsupported extension: ${ext}. Supported: .xlsx .xls .xlsb .ods .csv .tsv`);
 }
 
-// Read a non-xlsx spreadsheet via SheetJS, materialize into an ExcelJS
-// Workbook so the rest of the code (dump/markdown/json/sql/schema) works
-// unchanged. Loses some formatting; preserves values + formulas.
+// Read a non-xlsx spreadsheet via SheetJS, materialize into the engine's
+// workbook representation so the rest of the code (dump/markdown/json/sql/
+// schema) works unchanged. Loses some formatting; preserves values + formulas.
 function loadViaSheetJS(filePath) {
   const XLSX = lazyXlsx();
   const sheetJsWb = XLSX.readFile(filePath, { cellFormula: true, cellDates: true });
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   for (const name of sheetJsWb.SheetNames) {
     const sjsSheet = sheetJsWb.Sheets[name];
     const ws = wb.addWorksheet(name);
@@ -959,7 +960,7 @@ function loadViaSheetJS(filePath) {
 // ---------------------------------------------------------------------------
 
 async function streamDump(filePath, opts) {
-  const wb = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+  const wb = engine.streamReader(filePath, {
     sharedStrings: 'cache',
     hyperlinks: 'ignore',
     worksheets: 'emit',
@@ -1287,7 +1288,7 @@ function applyNumberFormat(ws, ref, fmt) {
 }
 
 function buildWorkbook(spec) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const warnings = []; // [{type, sheet, ref}, ...]
 
   function track(sheetName, ref, lossy) {
@@ -1644,7 +1645,7 @@ async function mainWrite(argv) {
   outPath = path.resolve(outPath);
 
   try {
-    await wb.xlsx.writeFile(outPath);
+    await engine.writeWorkbook(wb, outPath);
   } catch (e) {
     console.error(`Write error: ${e.message}`);
     process.exit(1);
