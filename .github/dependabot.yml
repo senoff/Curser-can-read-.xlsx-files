@@ -31,9 +31,13 @@ updates:
     groups:
       # ExcelJS itself + the spreadsheet/XML/CSV stack it pulls in.
       # Anything that parses untrusted bytes from a workbook lives here.
+      # @protobi/exceljs is the soft fork we may adopt; grouping it now means
+      # the first bump after adoption is reviewed alongside the rest of the
+      # parser stack rather than landing as a lone PR.
       exceljs-family:
         patterns:
           - "exceljs"
+          - "@protobi/exceljs"
           - "@fast-csv/*"
           - "fast-csv"
           - "archiver"

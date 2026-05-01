@@ -63,12 +63,48 @@ jobs:
           const entries = Object.entries(pkgs).filter(([k, v]) =>
             k && v && v.resolved && v.integrity && k.startsWith('node_modules/')
           );
-          let bad = 0;
+
+          // Map a lockfile path like "node_modules/a/node_modules/@scope/b"
+          // to the package name "@scope/b". Only the segments after the LAST
+          // "node_modules/" are part of the name.
+          function nameFromPath(p) {
+            const marker = 'node_modules/';
+            const idx = p.lastIndexOf(marker);
+            const tail = p.slice(idx + marker.length);
+            const parts = tail.split('/');
+            return parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+          }
+
+          // Skip non-registry sources (git, file:, http tarballs) — there is
+          // no canonical registry record to compare against.
+          function isRegistry(meta) {
+            return typeof meta.resolved === 'string' &&
+              meta.resolved.startsWith('https://registry.npmjs.org/');
+          }
+
+          // Limit concurrency so we don't open 150+ sockets against the
+          // registry at once.
+          async function pool(items, n, fn) {
+            const out = new Array(items.length);
+            let i = 0;
+            await Promise.all(Array.from({ length: n }, async () => {
+              while (true) {
+                const j = i++;
+                if (j >= items.length) return;
+                out[j] = await fn(items[j], j);
+              }
+            }));
+            return out;
+          }
+
           (async () => {
-            for (const [path, meta] of entries) {
-              const name = path.replace(/^node_modules\//, '').replace(/\/node_modules\//g, '/');
+            const checkable = entries.filter(([, meta]) => isRegistry(meta));
+            const skipped = entries.length - checkable.length;
+            let bad = 0;
+            await pool(checkable, 10, async ([path, meta]) => {
+              const name = nameFromPath(path);
               const version = meta.version;
-              const url = `https://registry.npmjs.org/${name.replace('/', '%2F')}/${version}`;
+              const url = `https://registry.npmjs.org/${encodeURIComponent(name).replace('%40', '@')}/${version}`;
               await new Promise((resolve) => {
                 https.get(url, (res) => {
                   let body = '';
@@ -77,21 +113,31 @@ jobs:
                     try {
                       const j = JSON.parse(body);
                       const remote = j.dist && j.dist.integrity;
-                      if (remote && remote !== meta.integrity) {
+                      if (!remote) {
+                        console.error(`UNRESOLVED ${name}@${version}: no dist.integrity in registry response (${res.statusCode})`);
+                        bad++;
+                      } else if (remote !== meta.integrity) {
                         console.error(`MISMATCH ${name}@${version}: lock=${meta.integrity} remote=${remote}`);
                         bad++;
                       }
-                    } catch (e) { /* package missing from registry — let npm ci catch it */ }
+                    } catch (e) {
+                      console.error(`PARSE_FAIL ${name}@${version}: registry response not JSON (${res.statusCode})`);
+                      bad++;
+                    }
                     resolve();
                   });
-                }).on('error', () => resolve());
+                }).on('error', (err) => {
+                  console.error(`NET_FAIL ${name}@${version}: ${err.message}`);
+                  bad++;
+                  resolve();
+                });
               });
-            }
+            });
             if (bad > 0) {
-              console.error(`${bad} integrity mismatch(es) — see notes in docs/INTEGRITY_PINNING.md`);
+              console.error(`${bad} integrity issue(s) across ${checkable.length} packages — see docs/INTEGRITY_PINNING.md`);
               process.exit(1);
             }
-            console.log(`OK: ${entries.length} packages reconciled with registry`);
+            console.log(`OK: ${checkable.length} packages reconciled with registry (${skipped} non-registry entries skipped)`);
           })();
           NODE
 

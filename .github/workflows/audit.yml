@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   audit:
-    name: npm audit (high+ fails the build)
+    name: npm audit (high+ fails the build, allowlist applied)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,8 +33,72 @@ jobs:
       - name: Install with locked integrity
         run: npm ci --ignore-scripts
 
-      - name: Audit production deps (fail on high or critical)
-        run: npm audit --omit=dev --audit-level=high
+      # Block the build on any high or critical advisory that is NOT in
+      # .github/audit-allowlist.json. The allowlist is reviewed in PRs and
+      # every entry has a reassess date.
+      - name: Audit production deps with allowlist
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+
+          const allowlistPath = '.github/audit-allowlist.json';
+          const allow = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'));
+          const allowedGhsas = new Set(allow.advisories.map(a => a.ghsa));
+
+          // Reassess-date check: any allowlist entry past its reassess date
+          // is treated as expired and no longer suppresses its advisory.
+          const today = new Date().toISOString().slice(0, 10);
+          const expired = allow.advisories.filter(a => a.reassess && a.reassess < today);
+          if (expired.length > 0) {
+            console.error('Allowlist entries past their reassess date:');
+            for (const e of expired) console.error(`  - ${e.ghsa} (${e.package}) reassess=${e.reassess}`);
+            console.error('Re-triage and update .github/audit-allowlist.json.');
+            process.exit(1);
+          }
+
+          let raw;
+          try {
+            raw = execSync('npm audit --omit=dev --json', { encoding: 'utf8' });
+          } catch (e) {
+            // npm audit exits non-zero when vulns exist; output is on stdout.
+            raw = e.stdout && e.stdout.toString();
+            if (!raw) {
+              console.error('npm audit produced no JSON output');
+              process.exit(2);
+            }
+          }
+          const report = JSON.parse(raw);
+          const vulns = report.vulnerabilities || {};
+
+          const blocking = [];
+          for (const [pkg, info] of Object.entries(vulns)) {
+            const sev = info.severity;
+            if (sev !== 'high' && sev !== 'critical') continue;
+            const via = (info.via || []).filter(v => typeof v === 'object');
+            for (const v of via) {
+              const ghsa = (v.url || '').split('/').pop();
+              if (!ghsa || !ghsa.startsWith('GHSA-')) continue;
+              if (allowedGhsas.has(ghsa)) {
+                console.log(`ALLOWLISTED ${sev} ${pkg} ${ghsa} — ${v.title}`);
+                continue;
+              }
+              blocking.push({ pkg, sev, ghsa, title: v.title, url: v.url });
+            }
+          }
+
+          if (blocking.length > 0) {
+            console.error('\nBlocking advisories (not in allowlist):');
+            for (const b of blocking) {
+              console.error(`  ${b.sev.toUpperCase()} ${b.pkg} ${b.ghsa} — ${b.title}`);
+              console.error(`    ${b.url}`);
+            }
+            console.error(`\n${blocking.length} advisory(ies) require action. Either fix the dep or, if it is genuinely unfixable and triaged, add an entry to ${allowlistPath} with a reassess date.`);
+            process.exit(1);
+          }
+          console.log('\nNo blocking advisories. Allowlist size:', allow.advisories.length);
+          NODE
 
       # Informational pass for low/moderate so the report is surfaced in CI
       # without blocking the merge.

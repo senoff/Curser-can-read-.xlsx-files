@@ -45,6 +45,12 @@ tight. The CI workflows `.github/workflows/audit.yml` and
    UTC) re-runs `npm ci` against the committed lockfile so a re-publish is
    caught even on quiet days with no PRs.
 
+8. **Triaged advisories live in `.github/audit-allowlist.json`.** Adding an
+   entry is a policy change that goes through PR review, every entry has a
+   `reassess` date, and the workflow auto-fails once an entry is past its
+   reassess date. The allowlist exists for genuinely unfixable advisories
+   (e.g. `xlsx` since SheetJS left npm) — not as a way to silence noise.
+
 ## What "verification" actually checks
 
 Three orthogonal things, in increasing order of strength:
@@ -60,6 +66,26 @@ republish a version with new bytes within a 72-hour window after publish
 (and longer for some legacy packages). The lockfile hash will still match
 what we cached, but the registry's advertised hash will have changed. We
 flag that.
+
+## The audit allowlist
+
+`.github/audit-allowlist.json` enumerates every high-or-critical advisory
+that `audit.yml` will not block on, with the rationale and a reassess date.
+Two rules:
+
+- **Entries past their `reassess` date auto-expire.** The audit script in
+  `audit.yml` checks every run and fails the build if any entry has a
+  `reassess` value before today. This forces re-triage rather than letting
+  exceptions ossify.
+- **Adding an entry is a security-policy change.** PR review the rationale
+  the same way you would review the underlying bug. "No upstream fix" is
+  necessary but not sufficient — the entry must also explain why the
+  advisory is acceptable in our specific use (e.g. attack surface, trust
+  boundary, exploitability in our code path).
+
+Moderate/low advisories do not need allowlisting today (the gate is
+high+). If we ever tighten the gate, every then-active moderate advisory
+will need the same triage treatment.
 
 ## Reacting to a verification failure
 
