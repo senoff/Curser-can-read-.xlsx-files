@@ -76,27 +76,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'
-        run: |
-          npm version "${{ inputs.version_bump }}" -m "release: %s [skip ci]"
-
-      - name: Read package metadata
-        id: pkg
-        run: |
-          NAME=$(node -p "require('./package.json').name")
-          VERSION=$(node -p "require('./package.json').version")
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing $NAME@$VERSION"
-
-      - name: Guard against republishing existing version
-        run: |
-          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version 2>/dev/null; then
-            echo "::error::Version ${{ steps.pkg.outputs.version }} is already published. Bump first."
-            exit 1
-          fi
-
       - name: Debug — verify token auth
         run: |
           set +e
@@ -119,6 +98,27 @@ jobs:
           npm access get status xlsx-for-ai --registry=https://registry.npmjs.org 2>&1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
+
+      - name: Bump version (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'
+        run: |
+          npm version "${{ inputs.version_bump }}" -m "release: %s [skip ci]"
+
+      - name: Read package metadata
+        id: pkg
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $NAME@$VERSION"
+
+      - name: Guard against republishing existing version
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version 2>/dev/null; then
+            echo "::error::Version ${{ steps.pkg.outputs.version }} is already published. Bump first."
+            exit 1
+          fi
 
       - name: Pack
         run: npm pack
