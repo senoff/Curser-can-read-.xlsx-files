@@ -6,7 +6,7 @@
 
 'use strict';
 
-const ExcelJS = require('exceljs');
+const ExcelJS = require('@protobi/exceljs');
 
 function colLetter(n) {
   let s = '';

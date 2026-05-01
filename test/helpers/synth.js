@@ -4,7 +4,7 @@
 
 'use strict';
 
-const ExcelJS = require('exceljs');
+const ExcelJS = require('@protobi/exceljs');
 const path = require('path');
 
 // Fixture #1: minimal — values, formulas, dates. The "happy path."

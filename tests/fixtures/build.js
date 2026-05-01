@@ -12,7 +12,7 @@
 // Run: node tests/fixtures/build.js
 
 const path = require('path');
-const ExcelJS = require('exceljs');
+const ExcelJS = require('@protobi/exceljs');
 
 async function build(outPath) {
   const wb = new ExcelJS.Workbook();
