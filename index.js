@@ -1865,11 +1865,50 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  const msg = err && err.message ? err.message : String(err);
-  console.error(msg);
-  if (/Invalid string length/i.test(msg)) {
-    console.error('Hint: this sheet renders to a text dump larger than V8\'s 512MB string limit. Try --max-rows N, --max-cols N, --max-tokens N, --range A1:..., or --stream.');
-  }
-  process.exit(1);
-});
+// Run as CLI when invoked directly. Skip when imported so tests can require
+// this module and exercise its internals without triggering main().
+if (require.main === module) {
+  main().catch((err) => {
+    const msg = err && err.message ? err.message : String(err);
+    console.error(msg);
+    if (/Invalid string length/i.test(msg)) {
+      console.error('Hint: this sheet renders to a text dump larger than V8\'s 512MB string limit. Try --max-rows N, --max-cols N, --max-tokens N, --range A1:..., or --stream.');
+    }
+    process.exit(1);
+  });
+}
+
+// Export internals for unit tests. Production CLI use never touches these
+// exports — this is only for `require('./index.js')` in test files.
+module.exports = {
+  // arg parsing
+  parseArgs,
+  parseWriteArgs,
+  // pure utilities
+  colLetter,
+  colNum,
+  parseRange,
+  isDefaultTextColor,
+  describeFill,
+  describeFont,
+  formatValue,
+  plainValue,
+  jsonValue,
+  describeNote,
+  escapeMd,
+  coerceMaybeDate,
+  coerceMarkdownValue,
+  // schema/format
+  inferType,
+  sqlIdent,
+  sqlVal,
+  // spec parsing
+  parseMarkdownSpec,
+  validateSpec,
+  buildCellValue,
+  // workbook builders
+  buildWorkbook,
+  trySimpleEval,
+  // budget
+  applyTokenBudget,
+};
