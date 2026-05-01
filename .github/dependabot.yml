@@ -1,0 +1,84 @@
+version: 2
+
+# xlsx-for-ai dependency surveillance.
+#
+# Primary concern: ExcelJS and its transitive XML/zip/CSV stack — that is the
+# code path that touches untrusted .xlsx input from end users. Any compromise
+# upstream of `exceljs` or its parsers reaches our users on `npm install`.
+#
+# Strategy:
+#   1. Direct production deps are watched individually so we see each bump.
+#   2. The exceljs-family transitives are grouped so a coordinated upgrade
+#      (e.g. archiver + zip-stream) lands as one PR instead of N noisy ones.
+#   3. GitHub Actions are pinned and watched separately.
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 10
+    versioning-strategy: "increase-if-necessary"
+    labels:
+      - "dependencies"
+      - "security-review"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      # ExcelJS itself + the spreadsheet/XML/CSV stack it pulls in.
+      # Anything that parses untrusted bytes from a workbook lives here.
+      exceljs-family:
+        patterns:
+          - "exceljs"
+          - "@fast-csv/*"
+          - "fast-csv"
+          - "archiver"
+          - "archiver-utils"
+          - "zip-stream"
+          - "compress-commons"
+          - "unzipper"
+          - "saxes"
+          - "xmlbuilder"
+          - "xmlbuilder2"
+          - "readable-stream"
+          - "buffer"
+        update-types:
+          - "minor"
+          - "patch"
+      # Other workbook engines and parsers we ship as direct deps.
+      workbook-engines:
+        patterns:
+          - "xlsx"
+          - "@formulajs/formulajs"
+          - "papaparse"
+        update-types:
+          - "minor"
+          - "patch"
+      # Tokenizer and other utility deps.
+      tooling:
+        patterns:
+          - "gpt-tokenizer"
+        update-types:
+          - "minor"
+          - "patch"
+    # Major bumps get their own PR per package — never grouped — because they
+    # are likely to break the round-trip / write path and need a manual look.
+    ignore: []
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"

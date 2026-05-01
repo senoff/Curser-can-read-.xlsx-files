@@ -1,0 +1,43 @@
+name: npm audit
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # Daily sweep so a freshly disclosed advisory is caught even with no PRs.
+    - cron: "17 11 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit (high+ fails the build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # `npm ci` enforces the lockfile and integrity hashes; fail closed if
+      # the lockfile drifted from package.json or any SRI hash mismatches.
+      - name: Install with locked integrity
+        run: npm ci --ignore-scripts
+
+      - name: Audit production deps (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Informational pass for low/moderate so the report is surfaced in CI
+      # without blocking the merge.
+      - name: Audit (full report, advisory only)
+        if: always()
+        run: npm audit --omit=dev || true
