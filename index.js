@@ -353,7 +353,7 @@ function dumpSheet(ws, wb, opts = {}) {
     lines.push(`(${ws.columnCount - endCol} more columns truncated)`);
   }
 
-  const merges = Object.keys(ws._merges || {});
+  const merges = (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges : [];
   if (merges.length) lines.push(`Merged: ${merges.join(', ')}`);
 
   if (ws.autoFilter) {
@@ -480,7 +480,7 @@ function dumpSheetMarkdown(ws, wb, opts = {}) {
   meta.push(`Total: ${ws.rowCount} rows × ${ws.columnCount} cols`);
   const frozen = (ws.views || []).find(v => v.state === 'frozen');
   if (frozen) meta.push(`Frozen: row ${frozen.ySplit ?? 0}, col ${frozen.xSplit ?? 0}`);
-  const merges = Object.keys(ws._merges || {});
+  const merges = (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges : [];
   if (merges.length) meta.push(`Merged: ${merges.slice(0, 6).join(', ')}${merges.length > 6 ? ', ...' : ''}`);
   const namedRanges = getNamedRanges(wb, ws.name);
   if (namedRanges.length) meta.push(`Named ranges: ${namedRanges.map(n => n.name).join(', ')}`);
@@ -581,7 +581,7 @@ function dumpSheetJSON(ws, wb, opts = {}) {
     frozen: null,
     columns: [],
     hiddenColumns: [],
-    merges: Object.keys(ws._merges || {}),
+    merges: (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges.slice() : [],
     autoFilter: null,
     printArea: null,
     namedRanges: getNamedRanges(wb, ws.name),
