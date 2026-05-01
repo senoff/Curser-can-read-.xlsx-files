@@ -45,12 +45,32 @@ jobs:
 
           const allowlistPath = '.github/audit-allowlist.json';
           const allow = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'));
+
+          // Schema check: every entry MUST carry ghsa, reassess (YYYY-MM-DD),
+          // reason, and owner. A missing reassess used to silently suppress
+          // forever; we now reject the allowlist outright.
+          const required = ['ghsa', 'reassess', 'reason', 'owner', 'package', 'severity'];
+          const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+          const malformed = [];
+          for (const a of allow.advisories || []) {
+            const missing = required.filter(f => !a[f]);
+            if (missing.length) malformed.push({ entry: a.ghsa || '<no ghsa>', issue: `missing: ${missing.join(', ')}` });
+            else if (!dateRe.test(a.reassess)) malformed.push({ entry: a.ghsa, issue: `bad reassess format: ${a.reassess}` });
+            else if (!/^GHSA-/.test(a.ghsa)) malformed.push({ entry: a.ghsa, issue: 'ghsa must start with GHSA-' });
+          }
+          if (malformed.length) {
+            console.error('Allowlist schema violations:');
+            for (const m of malformed) console.error(`  - ${m.entry}: ${m.issue}`);
+            console.error('Fix .github/audit-allowlist.json before merging.');
+            process.exit(1);
+          }
+
           const allowedGhsas = new Set(allow.advisories.map(a => a.ghsa));
 
           // Reassess-date check: any allowlist entry past its reassess date
           // is treated as expired and no longer suppresses its advisory.
           const today = new Date().toISOString().slice(0, 10);
-          const expired = allow.advisories.filter(a => a.reassess && a.reassess < today);
+          const expired = allow.advisories.filter(a => a.reassess < today);
           if (expired.length > 0) {
             console.error('Allowlist entries past their reassess date:');
             for (const e of expired) console.error(`  - ${e.ghsa} (${e.package}) reassess=${e.reassess}`);
