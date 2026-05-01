@@ -113,7 +113,10 @@ jobs:
 
       - name: Publish to npm
         if: github.event_name == 'push' || inputs.dry_run == false
-        run: npm publish --provenance --access public
+        # --provenance temporarily disabled: granular token + provenance combo
+        # was 404'ing despite valid token (npm 2026-05-01). Re-enable once
+        # diagnosed; see https://docs.npmjs.com/generating-provenance-statements.
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
 
