@@ -1,0 +1,127 @@
+name: npm audit
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # Daily sweep so a freshly disclosed advisory is caught even with no PRs.
+    - cron: "17 11 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit (high+ fails the build, allowlist applied)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # `npm ci` enforces the lockfile and integrity hashes; fail closed if
+      # the lockfile drifted from package.json or any SRI hash mismatches.
+      - name: Install with locked integrity
+        run: npm ci --ignore-scripts
+
+      # Block the build on any high or critical advisory that is NOT in
+      # .github/audit-allowlist.json. The allowlist is reviewed in PRs and
+      # every entry has a reassess date.
+      - name: Audit production deps with allowlist
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+
+          const allowlistPath = '.github/audit-allowlist.json';
+          const allow = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'));
+
+          // Schema check: every entry MUST carry ghsa, reassess (YYYY-MM-DD),
+          // reason, and owner. A missing reassess used to silently suppress
+          // forever; we now reject the allowlist outright.
+          const required = ['ghsa', 'reassess', 'reason', 'owner', 'package', 'severity'];
+          const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+          const malformed = [];
+          for (const a of allow.advisories || []) {
+            const missing = required.filter(f => !a[f]);
+            if (missing.length) malformed.push({ entry: a.ghsa || '<no ghsa>', issue: `missing: ${missing.join(', ')}` });
+            else if (!dateRe.test(a.reassess)) malformed.push({ entry: a.ghsa, issue: `bad reassess format: ${a.reassess}` });
+            else if (!/^GHSA-/.test(a.ghsa)) malformed.push({ entry: a.ghsa, issue: 'ghsa must start with GHSA-' });
+          }
+          if (malformed.length) {
+            console.error('Allowlist schema violations:');
+            for (const m of malformed) console.error(`  - ${m.entry}: ${m.issue}`);
+            console.error('Fix .github/audit-allowlist.json before merging.');
+            process.exit(1);
+          }
+
+          const allowedGhsas = new Set(allow.advisories.map(a => a.ghsa));
+
+          // Reassess-date check: any allowlist entry past its reassess date
+          // is treated as expired and no longer suppresses its advisory.
+          const today = new Date().toISOString().slice(0, 10);
+          const expired = allow.advisories.filter(a => a.reassess < today);
+          if (expired.length > 0) {
+            console.error('Allowlist entries past their reassess date:');
+            for (const e of expired) console.error(`  - ${e.ghsa} (${e.package}) reassess=${e.reassess}`);
+            console.error('Re-triage and update .github/audit-allowlist.json.');
+            process.exit(1);
+          }
+
+          let raw;
+          try {
+            raw = execSync('npm audit --omit=dev --json', { encoding: 'utf8' });
+          } catch (e) {
+            // npm audit exits non-zero when vulns exist; output is on stdout.
+            raw = e.stdout && e.stdout.toString();
+            if (!raw) {
+              console.error('npm audit produced no JSON output');
+              process.exit(2);
+            }
+          }
+          const report = JSON.parse(raw);
+          const vulns = report.vulnerabilities || {};
+
+          const blocking = [];
+          for (const [pkg, info] of Object.entries(vulns)) {
+            const sev = info.severity;
+            if (sev !== 'high' && sev !== 'critical') continue;
+            const via = (info.via || []).filter(v => typeof v === 'object');
+            for (const v of via) {
+              const ghsa = (v.url || '').split('/').pop();
+              if (!ghsa || !ghsa.startsWith('GHSA-')) continue;
+              if (allowedGhsas.has(ghsa)) {
+                console.log(`ALLOWLISTED ${sev} ${pkg} ${ghsa} — ${v.title}`);
+                continue;
+              }
+              blocking.push({ pkg, sev, ghsa, title: v.title, url: v.url });
+            }
+          }
+
+          if (blocking.length > 0) {
+            console.error('\nBlocking advisories (not in allowlist):');
+            for (const b of blocking) {
+              console.error(`  ${b.sev.toUpperCase()} ${b.pkg} ${b.ghsa} — ${b.title}`);
+              console.error(`    ${b.url}`);
+            }
+            console.error(`\n${blocking.length} advisory(ies) require action. Either fix the dep or, if it is genuinely unfixable and triaged, add an entry to ${allowlistPath} with a reassess date.`);
+            process.exit(1);
+          }
+          console.log('\nNo blocking advisories. Allowlist size:', allow.advisories.length);
+          NODE
+
+      # Informational pass for low/moderate so the report is surfaced in CI
+      # without blocking the merge.
+      - name: Audit (full report, advisory only)
+        if: always()
+        run: npm audit --omit=dev || true

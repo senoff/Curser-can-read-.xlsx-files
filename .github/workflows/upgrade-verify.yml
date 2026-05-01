@@ -1,0 +1,172 @@
+name: upgrade-verify
+
+# Runs when Dependabot (or a human) opens a PR that bumps deps, AND on a
+# daily schedule against `main`. Verifies that every package in the
+# resolved tree carries a valid npm registry signature and that the
+# lockfile's SRI hashes still match what the registry serves.
+#
+# Failing this check means one of:
+#   - a package was republished without a matching signature (account takeover,
+#     registry compromise, or maintainer key rotation);
+#   - the lockfile's integrity hash no longer matches the tarball npm now
+#     serves (silent re-publish or man-in-the-middle).
+#
+# On a PR: the PR is blocked until a human confirms.
+# On the daily run: the cron run fails loudly and a human investigates —
+# the silent-republish window is up to 72 hours, so daily coverage means
+# we catch a republish even during quiet weeks with no PR traffic.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "package.json"
+      - "package-lock.json"
+  schedule:
+    # Offset from audit.yml (11:17) so the two workflows don't pile up on
+    # the same Actions runner minute.
+    - cron: "43 11 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  verify-signatures:
+    name: npm signature + integrity verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # `npm ci` re-fetches every tarball and verifies the SRI hash recorded
+      # in package-lock.json. Any drift = hard failure here.
+      - name: Install with strict integrity
+        run: npm ci --ignore-scripts
+
+      # `npm audit signatures` walks the installed tree and asks the registry
+      # for each package's signing key, verifying ECDSA signatures end to end.
+      # Requires npm >= 9.5; setup-node@v4 with node 20 ships a new enough npm.
+      - name: Verify package signatures
+        run: npm audit signatures
+
+      # Belt-and-suspenders: re-resolve every entry in the lockfile to confirm
+      # the registry still serves the same `integrity` value we have pinned.
+      # Catches the silent-republish vector where a maintainer (or attacker
+      # with a stolen token) publishes the same version with new bytes.
+      - name: Re-verify lockfile integrity hashes
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const https = require('https');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          const pkgs = lock.packages || {};
+          const entries = Object.entries(pkgs).filter(([k, v]) =>
+            k && v && v.resolved && v.integrity && k.startsWith('node_modules/')
+          );
+
+          // Map a lockfile path like "node_modules/a/node_modules/@scope/b"
+          // to the package name "@scope/b". Only the segments after the LAST
+          // "node_modules/" are part of the name.
+          function nameFromPath(p) {
+            const marker = 'node_modules/';
+            const idx = p.lastIndexOf(marker);
+            const tail = p.slice(idx + marker.length);
+            const parts = tail.split('/');
+            return parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+          }
+
+          // Skip non-registry sources (git, file:, http tarballs) — there is
+          // no canonical registry record to compare against.
+          function isRegistry(meta) {
+            return typeof meta.resolved === 'string' &&
+              meta.resolved.startsWith('https://registry.npmjs.org/');
+          }
+
+          // Limit concurrency so we don't open 150+ sockets against the
+          // registry at once.
+          async function pool(items, n, fn) {
+            const out = new Array(items.length);
+            let i = 0;
+            await Promise.all(Array.from({ length: n }, async () => {
+              while (true) {
+                const j = i++;
+                if (j >= items.length) return;
+                out[j] = await fn(items[j], j);
+              }
+            }));
+            return out;
+          }
+
+          (async () => {
+            const checkable = entries.filter(([, meta]) => isRegistry(meta));
+            const skipped = entries.length - checkable.length;
+            let bad = 0;
+            await pool(checkable, 10, async ([path, meta]) => {
+              const name = nameFromPath(path);
+              const version = meta.version;
+              const url = `https://registry.npmjs.org/${encodeURIComponent(name).replace('%40', '@')}/${version}`;
+              await new Promise((resolve) => {
+                https.get(url, (res) => {
+                  let body = '';
+                  res.on('data', (c) => (body += c));
+                  res.on('end', () => {
+                    try {
+                      const j = JSON.parse(body);
+                      const remote = j.dist && j.dist.integrity;
+                      if (!remote) {
+                        console.error(`UNRESOLVED ${name}@${version}: no dist.integrity in registry response (${res.statusCode})`);
+                        bad++;
+                      } else if (remote !== meta.integrity) {
+                        console.error(`MISMATCH ${name}@${version}: lock=${meta.integrity} remote=${remote}`);
+                        bad++;
+                      }
+                    } catch (e) {
+                      console.error(`PARSE_FAIL ${name}@${version}: registry response not JSON (${res.statusCode})`);
+                      bad++;
+                    }
+                    resolve();
+                  });
+                }).on('error', (err) => {
+                  console.error(`NET_FAIL ${name}@${version}: ${err.message}`);
+                  bad++;
+                  resolve();
+                });
+              });
+            });
+            if (bad > 0) {
+              console.error(`${bad} integrity issue(s) across ${checkable.length} packages — see docs/INTEGRITY_PINNING.md`);
+              process.exit(1);
+            }
+            console.log(`OK: ${checkable.length} packages reconciled with registry (${skipped} non-registry entries skipped)`);
+          })();
+          NODE
+
+      - name: Annotate PR on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "Signature or integrity verification failed for this dependency bump.",
+              "",
+              "Before merging:",
+              "1. Read `docs/INTEGRITY_PINNING.md` — section *Reacting to a verification failure*.",
+              "2. Confirm the new version is actually a legitimate publish from the maintainer (Slack/email, GitHub release, etc.).",
+              "3. If anything looks off, see `FORK_READINESS.md` for the protobi fallback path.",
+            ].join("\n");
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
