@@ -53,6 +53,8 @@ function parseArgs(argv) {
     maxRows: null,
     maxCols: null,
     maxTokens: null,
+    reportBug: null,
+    exportRedactedWorkbook: null,
     help: false,
   };
   let i = 0;
@@ -73,6 +75,8 @@ function parseArgs(argv) {
     else if (arg === '--max-rows')    { opts.maxRows = parseInt(argv[++i], 10); }
     else if (arg === '--max-cols')    { opts.maxCols = parseInt(argv[++i], 10); }
     else if (arg === '--max-tokens')  { opts.maxTokens = parseInt(argv[++i], 10); }
+    else if (arg === '--report-bug')              { opts.reportBug = argv[++i]; }
+    else if (arg === '--export-redacted-workbook'){ opts.exportRedactedWorkbook = argv[++i]; }
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else                                opts.positional.push(arg);
     i++;
@@ -118,6 +122,19 @@ Other modes:
   --diff OTHER      Diff this workbook vs OTHER, emit changed cells/sheets
   --stream          Streaming reader for huge .xlsx files (>100MB);
                     emits row-by-row, drops some sheet metadata
+
+Bug reporting (privacy-by-design — no data leaves your machine):
+  --report-bug <input.xlsx>
+                    Generate xlsx-for-ai-bugreport-<ISO>.json describing
+                    the workbook's structure (sheet count/shape, feature
+                    inventory, env). Contains zero cell values, formulas,
+                    or named-range targets. Attach to a GitHub issue.
+  --export-redacted-workbook <input.xlsx>
+                    Produce <input>-redacted.xlsx with every cell value
+                    replaced by a typed placeholder (numbers→0,
+                    strings→"x", bools→false, dates→1900-01-01). Formulas,
+                    structure, styles, named ranges preserved. Optional
+                    attachment for hard-to-repro bugs.
 
 Misc:
   -h, --help        Show this help
@@ -1675,6 +1692,28 @@ async function main() {
   const opts = parseArgs(argv);
 
   if (opts.help) { printHelp(); process.exit(0); }
+
+  // Bug-report and redacted-workbook modes consume their input via the
+  // flag itself, so they bypass the normal positional / loader path.
+  if (opts.reportBug) {
+    const { generateBugReport, writeBugReport } = require('./lib/bugReport');
+    const inputPath = path.resolve(opts.reportBug);
+    const report = await generateBugReport(inputPath);
+    const outPath = writeBugReport(report, process.cwd());
+    console.log(outPath);
+    return;
+  }
+  if (opts.exportRedactedWorkbook) {
+    const { exportRedactedWorkbook } = require('./lib/redactWorkbook');
+    const inputPath = path.resolve(opts.exportRedactedWorkbook);
+    const ext = path.extname(inputPath);
+    const base = path.basename(inputPath, ext);
+    const outPath = path.join(path.dirname(inputPath), `${base}-redacted${ext}`);
+    await exportRedactedWorkbook(inputPath, outPath);
+    console.log(outPath);
+    return;
+  }
+
   if (opts.positional.length < 1) { printHelp(); process.exit(1); }
 
   const filePath = path.resolve(opts.positional[0]);
