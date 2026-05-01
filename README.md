@@ -316,6 +316,49 @@ Run `rm -rf node_modules package-lock.json && npm install` and the warnings will
 
 A future release may apply these dep upgrades via `patch-package` so they travel through the dep graph automatically. The infrastructure is in place; the patches haven't been needed urgently because most installs are CLI-direct.
 
+## Reporting bugs
+
+**The privacy contract: we never auto-send your data.** xlsx-for-ai has no telemetry endpoint and no consent dialog to maintain — there's nothing to opt out of, because nothing leaves your machine unless you choose to attach it to a GitHub issue.
+
+When something breaks on a real workbook, two flags help us reproduce locally without asking you to share the original file:
+
+```bash
+# Required — small JSON describing the workbook's structure (no cell content)
+npx xlsx-for-ai --report-bug your-file.xlsx
+
+# Optional — full workbook with every cell value replaced by a typed placeholder
+npx xlsx-for-ai --export-redacted-workbook your-file.xlsx
+```
+
+### `--report-bug`
+
+Writes `xlsx-for-ai-bugreport-<ISO-timestamp>.json` to the current directory. The report contains:
+
+- File size, sheet count, per-sheet shape (rows × cols), per-sheet merge counts
+- Feature inventory detected via OOXML part inspection — pivot tables, charts, threaded comments, sensitivity labels, linked data types, sparklines, Power Query, slicers, timelines, dynamic arrays, conditional formatting, VBA, and more
+- Defined-name *labels* (e.g. `Totals`) — but NOT their target ranges or formulas
+- Tool version, Node version, OS + arch
+
+What the report **never** contains: cell values, formulas, shared strings, named-range targets, comment text, or your absolute file path. You can `cat` it before attaching to verify.
+
+### `--export-redacted-workbook`
+
+Writes `<input>-redacted.xlsx` next to the input. Every cell value is replaced by a typed placeholder:
+
+| Original cell type | Placeholder |
+|--------------------|-------------|
+| Number             | `0`         |
+| String             | `"x"`       |
+| Boolean            | `false`     |
+| ISO date           | `1899-12-30`|
+| Error              | preserved   |
+
+Formulas, sheet names, merges, named ranges (formulas), styles, conditional formatting, pivots, charts, queries, and macros are passed through byte-for-byte at the ZIP/XML level (no lossy ExcelJS round-trip). Shared strings and comment payloads are also rewritten to `"x"` for defense-in-depth. Open the redacted file in Excel to confirm it still triggers the bug, then attach it.
+
+### Filing the issue
+
+Open https://github.com/senoff/xlsx-for-ai/issues — the bug template asks you to drag-drop the JSON (and optionally the redacted workbook). That's the whole workflow. No accounts to create, no SDK to integrate, no consent screen to click through.
+
 ## Why This Exists
 
 Spreadsheets are everywhere in real projects — financial models, data exports, config files, tax estimates. AI coding agents choke on binary formats. This tool makes spreadsheets legible to AI with zero information loss, including the tricky bits like shared formulas, named ranges, and merged cells that other tools drop.
