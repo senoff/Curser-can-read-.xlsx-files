@@ -1,0 +1,135 @@
+name: publish
+
+# Publishes xlsx-for-ai to npm. Two trigger modes:
+#
+#   1. workflow_dispatch — fire from any terminal:
+#        gh workflow run publish.yml --ref main \
+#          -f version_bump=patch \
+#          -f dry_run=false
+#      Bumps package.json, commits, tags, pushes, publishes.
+#
+#   2. push of a v* tag — for "tag, then publish":
+#        npm version patch && git push --follow-tags
+#      Just publishes whatever's at the tag; no bump.
+#
+# Setup prereqs (one-time, can't be automated — needs the package owner):
+#   - npm: account 2FA = "Authorization only" (not "Authorization and writes")
+#   - npm: package MFA = automation (`npm access set mfa=automation xlsx-for-ai`)
+#   - npm: granular access token, scope = "Read and Publish" on xlsx-for-ai,
+#          type = automation (the "bypass 2FA" checkbox in the UI)
+#   - GitHub repo: Secrets and variables → Actions → NPM_TOKEN = the granular token
+#
+# Without ALL of {account-mode, package-mfa, automation-token}, npm will
+# reject the publish with EOTP even when the token claims to bypass.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "How to bump the version. Use 'none' to publish current package.json verbatim."
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+          - none
+      dry_run:
+        description: "Run npm pack + clean-install verification but skip the actual publish."
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed to commit the version bump + push the tag
+  id-token: write   # for npm provenance (free supply-chain signal)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need full history so npm version can create a tag without complaints
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test --if-present
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'
+        run: |
+          npm version "${{ inputs.version_bump }}" -m "release: %s [skip ci]"
+
+      - name: Read package metadata
+        id: pkg
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $NAME@$VERSION"
+
+      - name: Guard against republishing existing version
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version 2>/dev/null; then
+            echo "::error::Version ${{ steps.pkg.outputs.version }} is already published. Bump first."
+            exit 1
+          fi
+
+      - name: Pack
+        run: npm pack
+
+      - name: Clean-install verification (per feedback_pre_publish_clean_install.md)
+        run: |
+          set -e
+          TARBALL=$(ls ${{ steps.pkg.outputs.name }}-${{ steps.pkg.outputs.version }}.tgz)
+          mkdir -p /tmp/clean-install-test
+          cd /tmp/clean-install-test
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE/$TARBALL"
+          npx --no-install xlsx-for-ai --version
+          echo "Clean install verified: tarball installs and CLI runs."
+
+      - name: Publish to npm
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Push version-bump commit + tag
+        if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none' && inputs.dry_run == false
+        run: |
+          git push --follow-tags
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Publish summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Trigger:** ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Package:** ${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "- **Bump:** ${{ inputs.version_bump }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Dry run:** ${{ inputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
