@@ -584,6 +584,7 @@ function dumpSheetJSON(ws, wb, opts = {}) {
     frozen: null,
     columns: [],
     hiddenColumns: [],
+    hiddenRows: [],
     merges: (ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges.slice() : [],
     autoFilter: null,
     printArea: null,
@@ -655,6 +656,7 @@ function dumpSheetJSON(ws, wb, opts = {}) {
 
   for (let r = startRow; r <= endRow; r++) {
     const row = ws.getRow(r);
+    if (row.hidden) out.hiddenRows.push(r);
     for (let c = startCol; c <= endCol; c++) {
       const cell = row.getCell(c);
       const raw = cell.value;
@@ -1380,6 +1382,17 @@ function buildWorkbook(spec) {
     if (sheet.numberFormat && typeof sheet.numberFormat === 'object') {
       for (const [ref, fmt] of Object.entries(sheet.numberFormat)) {
         try { applyNumberFormat(ws, ref, fmt); } catch (_) {}
+      }
+    }
+
+    // Restore hidden-row state from --json round-trip. Without this, the
+    // `hiddenRows: [...]` field emitted on read is silently dropped on write,
+    // breaking the round-trip claim for fixtures like annotations.xlsx.
+    if (Array.isArray(sheet.hiddenRows)) {
+      for (const n of sheet.hiddenRows) {
+        if (typeof n === 'number' && n >= 1) {
+          try { ws.getRow(n).hidden = true; } catch (_) {}
+        }
       }
     }
 
