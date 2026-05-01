@@ -41,9 +41,14 @@ tight. The CI workflows `.github/workflows/audit.yml` and
    grouping). The reviewer reads the upstream changelog and runs the
    round-trip corpus before approving.
 
-7. **Lockfile drift detection runs daily.** The `audit.yml` schedule (11:17
-   UTC) re-runs `npm ci` against the committed lockfile so a re-publish is
-   caught even on quiet days with no PRs.
+7. **Lockfile drift detection runs daily, in two layers.** `audit.yml` at
+   11:17 UTC re-runs `npm ci` against the committed lockfile (catches
+   anything that breaks the SRI compare). `upgrade-verify.yml` at 11:43
+   UTC re-resolves every locked entry against the registry's currently
+   advertised `dist.integrity` (catches a silent re-publish even when our
+   cached SRI compare still passes). The two layers run on every PR that
+   touches the lockfile *and* daily on `main`, so the 72-hour silent
+   re-publish window is covered even during quiet weeks with no PRs.
 
 8. **Triaged advisories live in `.github/audit-allowlist.json`.** Adding an
    entry is a policy change that goes through PR review, every entry has a

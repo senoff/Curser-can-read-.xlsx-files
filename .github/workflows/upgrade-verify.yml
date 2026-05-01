@@ -1,15 +1,20 @@
 name: upgrade-verify
 
-# Runs when Dependabot (or a human) opens a PR that bumps deps. Verifies that
-# every package in the resolved tree carries a valid npm registry signature
-# and that the lockfile's SRI hashes still match what the registry serves.
+# Runs when Dependabot (or a human) opens a PR that bumps deps, AND on a
+# daily schedule against `main`. Verifies that every package in the
+# resolved tree carries a valid npm registry signature and that the
+# lockfile's SRI hashes still match what the registry serves.
 #
 # Failing this check means one of:
 #   - a package was republished without a matching signature (account takeover,
 #     registry compromise, or maintainer key rotation);
 #   - the lockfile's integrity hash no longer matches the tarball npm now
 #     serves (silent re-publish or man-in-the-middle).
-# Either way, the PR is blocked until a human confirms.
+#
+# On a PR: the PR is blocked until a human confirms.
+# On the daily run: the cron run fails loudly and a human investigates —
+# the silent-republish window is up to 72 hours, so daily coverage means
+# we catch a republish even during quiet weeks with no PR traffic.
 
 on:
   pull_request:
@@ -18,6 +23,11 @@ on:
     paths:
       - "package.json"
       - "package-lock.json"
+  schedule:
+    # Offset from audit.yml (11:17) so the two workflows don't pile up on
+    # the same Actions runner minute.
+    - cron: "43 11 * * *"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -142,7 +152,7 @@ jobs:
           NODE
 
       - name: Annotate PR on failure
-        if: failure()
+        if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |

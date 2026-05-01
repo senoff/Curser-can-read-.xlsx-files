@@ -297,6 +297,14 @@ The same rule works for Claude Code (`.claude/rules/`), Copilot (`.github/copilo
 
 Spreadsheets are everywhere in real projects — financial models, data exports, config files, tax estimates. AI coding agents choke on binary formats. This tool makes spreadsheets legible to AI with zero information loss, including the tricky bits like shared formulas, named ranges, and merged cells that other tools drop.
 
+## Security
+
+`xlsx-for-ai` parses untrusted `.xlsx` files on your machine. The
+project's security policy, supported-versions table, and reporting inbox
+are in [SECURITY.md](SECURITY.md). The supply-chain hardening that goes
+with it lives in [docs/INTEGRITY_PINNING.md](docs/INTEGRITY_PINNING.md)
+and [FORK_READINESS.md](FORK_READINESS.md).
+
 ## License
 
 MIT
