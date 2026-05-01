@@ -76,29 +76,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Debug — verify token auth
-        run: |
-          set +e
-          echo "=== npm whoami ==="
-          npm whoami --registry=https://registry.npmjs.org
-          echo "exit: $?"
-          echo ""
-          echo "=== curl /-/whoami with bearer ==="
-          HTTP_CODE=$(curl -s -o /tmp/whoami.json -w "%{http_code}" \
-            -H "Authorization: Bearer $NODE_AUTH_TOKEN" \
-            https://registry.npmjs.org/-/whoami)
-          echo "HTTP $HTTP_CODE"
-          cat /tmp/whoami.json
-          echo ""
-          echo ""
-          echo "=== npm access list packages (first 20) ==="
-          npm access list packages --registry=https://registry.npmjs.org 2>&1 | head -20
-          echo ""
-          echo "=== package access status ==="
-          npm access get status xlsx-for-ai --registry=https://registry.npmjs.org 2>&1
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
-
       - name: Bump version (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'
         run: |
@@ -136,10 +113,7 @@ jobs:
 
       - name: Publish to npm
         if: github.event_name == 'push' || inputs.dry_run == false
-        # --provenance temporarily disabled: granular token + provenance combo
-        # was 404'ing despite valid token (npm 2026-05-01). Re-enable once
-        # diagnosed; see https://docs.npmjs.com/generating-provenance-statements.
-        run: npm publish --access public
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
 
