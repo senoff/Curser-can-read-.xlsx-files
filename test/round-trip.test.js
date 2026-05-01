@@ -65,9 +65,9 @@ async function roundTrip(fixturePath, outPath) {
 const FIXTURE_TESTS = [
   { name: 'basic-values.xlsx',   todo: false },
   { name: 'widths-layout.xlsx',  todo: false },
-  { name: 'merges-names.xlsx',   todo: 'merges become top-left-cell refs (e.g. "A1") on round-trip; need to emit "A1:D1" form in --json output' },
+  { name: 'merges-names.xlsx',   todo: false },
   { name: 'multi-sheet.xlsx',    todo: false },
-  { name: 'annotations.xlsx',    todo: 'hidden rows not preserved; --json output and write path need a hiddenRows[] field per sheet' },
+  { name: 'annotations.xlsx',    todo: false },
 ];
 
 for (const { name, todo } of FIXTURE_TESTS) {
