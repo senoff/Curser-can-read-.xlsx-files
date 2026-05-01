@@ -97,6 +97,29 @@ jobs:
             exit 1
           fi
 
+      - name: Debug — verify token auth
+        run: |
+          set +e
+          echo "=== npm whoami ==="
+          npm whoami --registry=https://registry.npmjs.org
+          echo "exit: $?"
+          echo ""
+          echo "=== curl /-/whoami with bearer ==="
+          HTTP_CODE=$(curl -s -o /tmp/whoami.json -w "%{http_code}" \
+            -H "Authorization: Bearer $NODE_AUTH_TOKEN" \
+            https://registry.npmjs.org/-/whoami)
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/whoami.json
+          echo ""
+          echo ""
+          echo "=== npm access list packages (first 20) ==="
+          npm access list packages --registry=https://registry.npmjs.org 2>&1 | head -20
+          echo ""
+          echo "=== package access status ==="
+          npm access get status xlsx-for-ai --registry=https://registry.npmjs.org 2>&1
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
+
       - name: Pack
         run: npm pack
 
