@@ -22,10 +22,11 @@ if (!process.env.XLSX_FOR_AI_RESPAWNED) {
 const path = require('path');
 const fs   = require('fs');
 // All xlsx-engine access goes through the engine abstraction in lib/engine.js
-// — never require the underlying engine directly. To swap engines (fork,
-// different library, server-side service), replace lib/engine.js. Nothing
-// else changes. Current engine: @protobi/exceljs (drop-in fork of exceljs
-// with active maintenance + preservation patches; see ROADMAP for rationale).
+// — lib/engine.js is the ONLY place in lib/ that requires @protobi/exceljs.
+// To swap engines (fork, different library, server-side service), replace
+// lib/engine.js; nothing else changes. Current engine: @protobi/exceljs
+// (drop-in fork of exceljs with active maintenance + preservation patches;
+// see ROADMAP for rationale).
 const engine = require('./lib/engine');
 
 // Lazy-load heavy deps only when their feature is used (keeps cold start fast
