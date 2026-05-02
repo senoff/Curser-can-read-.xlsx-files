@@ -381,6 +381,18 @@ function detectRegion(ws) {
   const colCount = ws.columnCount;
   if (rowCount === 0 || colCount === 0) return null;
 
+  // ExcelJS reports rowCount/columnCount as the highest USED row/column,
+  // not actual storage. A workbook with one cell at XFD1048576 reports
+  // 1048576 × 16384 = ~17B coordinates. Refuse the scan past 5M cells —
+  // pathological/malicious inputs would otherwise hang the CLI.
+  if (rowCount * colCount > 5_000_000) {
+    console.warn(
+      `detectRegion: workbook reports ${rowCount}×${colCount} cell dimensions, ` +
+      `exceeds 5M-cell scan cap; skipping region detection`
+    );
+    return null;
+  }
+
   for (let r = 1; r <= rowCount; r++) {
     const row = ws.getRow(r);
     for (let c = 1; c <= colCount; c++) {
