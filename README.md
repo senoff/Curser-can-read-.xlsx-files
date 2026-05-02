@@ -94,6 +94,7 @@ npx xlsx-for-ai data.xlsx "Sheet1" --stdout --max-rows 50 --compact
 | `[sheetName]` | Positional: dump only this sheet |
 | `--range A1:D50` | Dump only this rectangular range |
 | `--named-range NAME` | Dump only the cells covered by a workbook-defined name |
+| `--region` | Auto-detect the dominant contiguous data block (Excel "current region" / Ctrl+Shift+*). Picks the largest region by populated-cell count when multiple disjoint blocks exist. Compatible with `--max-rows` / `--max-cols`. |
 | `--max-rows N` | Cap at the first N rows per sheet |
 | `--max-cols N` | Cap at the first N columns per sheet |
 

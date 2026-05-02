@@ -56,6 +56,7 @@ function parseArgs(argv) {
     diff: null,
     range: null,
     namedRange: null,
+    region: false,
     maxRows: null,
     maxCols: null,
     maxTokens: null,
@@ -78,6 +79,7 @@ function parseArgs(argv) {
     else if (arg === '--diff')        { opts.diff = argv[++i]; }
     else if (arg === '--range')       { opts.range = argv[++i]; }
     else if (arg === '--named-range') { opts.namedRange = argv[++i]; }
+    else if (arg === '--region')       opts.region = true;
     else if (arg === '--max-rows')    { opts.maxRows = parseInt(argv[++i], 10); }
     else if (arg === '--max-cols')    { opts.maxCols = parseInt(argv[++i], 10); }
     else if (arg === '--max-tokens')  { opts.maxTokens = parseInt(argv[++i], 10); }
@@ -112,6 +114,10 @@ Selection:
   [sheetName]       Positional second arg, dump only this sheet
   --range A1:D50    Dump only this rectangular range
   --named-range NM  Dump only the cells covered by this defined name
+  --region          Auto-detect the dominant contiguous data block (Excel
+                    "current region" semantics); picks the largest region
+                    by populated-cell count when multiple disjoint blocks
+                    exist. Compatible with --max-rows / --max-cols.
   --max-rows N      Limit to first N rows per sheet
   --max-cols N      Limit to first N columns per sheet
 
@@ -151,6 +157,8 @@ Examples:
   npx xlsx-for-ai data.xlsx --json --max-tokens 8000 --stdout
   npx xlsx-for-ai data.csv --md --stdout
   npx xlsx-for-ai data.xlsx --range B2:F100 --stdout
+  npx xlsx-for-ai data.xlsx --region --stdout
+  npx xlsx-for-ai data.xlsx --region --max-rows 50 --stdout
   npx xlsx-for-ai data.xlsx --named-range MyTotals --stdout
   npx xlsx-for-ai data.xlsx --sql --stdout > schema.sql
   npx xlsx-for-ai old.xlsx --diff new.xlsx --stdout
@@ -327,6 +335,103 @@ function resolveNamedRange(wb, name) {
 }
 
 // ---------------------------------------------------------------------------
+// Region detection — "current region" semantics (Excel Ctrl+Shift+*)
+//
+// Finds the dominant contiguous data block on a worksheet. Algorithm:
+//   1. Scan the sheet to collect all populated cells.
+//   2. Build connected components using 8-neighbor flood fill (cells that
+//      share a corner or edge are in the same region).
+//   3. For each component, compute the bounding rectangle and the count of
+//      populated cells inside it.
+//   4. Return the bounding box of the component with the most populated cells
+//      (tie-break: largest populated count; if still tied, the first found).
+//
+// Returns {startRow, startCol, endRow, endCol} (1-indexed), or null if the
+// sheet has no populated cells.
+// ---------------------------------------------------------------------------
+
+function detectRegion(ws) {
+  // Step 1: collect all populated cells into a Set for O(1) lookup.
+  // We store them as "row,col" strings and also keep a list for iteration.
+  const populated = new Set();
+  const cells = [];
+
+  const rowCount = ws.rowCount;
+  const colCount = ws.columnCount;
+  if (rowCount === 0 || colCount === 0) return null;
+
+  for (let r = 1; r <= rowCount; r++) {
+    const row = ws.getRow(r);
+    for (let c = 1; c <= colCount; c++) {
+      const v = row.getCell(c).value;
+      if (v != null && v !== '') {
+        const key = `${r},${c}`;
+        populated.add(key);
+        cells.push([r, c]);
+      }
+    }
+  }
+
+  if (cells.length === 0) return null;
+
+  // Step 2: flood-fill connected components (8-neighbor).
+  const visited = new Set();
+  const components = [];
+
+  for (const [startR, startC] of cells) {
+    const key = `${startR},${startC}`;
+    if (visited.has(key)) continue;
+
+    // BFS from this seed cell.
+    const component = [];
+    const queue = [[startR, startC]];
+    visited.add(key);
+
+    while (queue.length > 0) {
+      const [r, c] = queue.shift();
+      component.push([r, c]);
+      // 8 neighbors
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr < 1 || nc < 1) continue;
+          const nk = `${nr},${nc}`;
+          if (!visited.has(nk) && populated.has(nk)) {
+            visited.add(nk);
+            queue.push([nr, nc]);
+          }
+        }
+      }
+    }
+    components.push(component);
+  }
+
+  // Step 3: pick the component with the most populated cells.
+  let best = null;
+  let bestCount = -1;
+  for (const comp of components) {
+    if (comp.length > bestCount) {
+      bestCount = comp.length;
+      best = comp;
+    }
+  }
+
+  // Step 4: compute bounding rectangle of the winning component.
+  let minR = Infinity, maxR = -Infinity;
+  let minC = Infinity, maxC = -Infinity;
+  for (const [r, c] of best) {
+    if (r < minR) minR = r;
+    if (r > maxR) maxR = r;
+    if (c < minC) minC = c;
+    if (c > maxC) maxC = c;
+  }
+
+  return { startRow: minR, endRow: maxR, startCol: minC, endCol: maxC };
+}
+
+// ---------------------------------------------------------------------------
 // Selection bounds — combines --range, --named-range, --max-rows/cols, sheet
 // dimensions into a single {startRow, startCol, endRow, endCol}.
 // ---------------------------------------------------------------------------
@@ -337,6 +442,9 @@ function selectionBounds(ws, opts) {
     bounds = parseRange(opts.range);
   } else if (opts.namedRangeBounds) {
     bounds = opts.namedRangeBounds;
+  } else if (opts.region) {
+    bounds = detectRegion(ws);
+    // bounds may be null (empty sheet); handled below by falling back to sheet dimensions.
   }
   const startRow = bounds ? bounds.startRow : 1;
   const startCol = bounds ? bounds.startCol : 1;
@@ -1839,6 +1947,16 @@ async function main() {
 
   const baseName = path.basename(filePath, path.extname(filePath));
 
+  // --region: warn per-sheet if no data block was found (empty sheet).
+  if (opts.region) {
+    for (const ws of sheets) {
+      const r = detectRegion(ws);
+      if (!r) {
+        console.error(`note: --region: no data found in sheet "${ws.name}"; dumping full sheet dimensions.`);
+      }
+    }
+  }
+
   // Pick output formatter.
   const renderText  = (ws) => dumpSheet(ws, wb, perSheetOpts);
   const renderMd    = (ws) => dumpSheetMarkdown(ws, wb, perSheetOpts);
@@ -1966,4 +2084,7 @@ module.exports = {
   trySimpleEval,
   // budget
   applyTokenBudget,
+  // region detection
+  detectRegion,
+  selectionBounds,
 };
