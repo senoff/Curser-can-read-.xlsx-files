@@ -63,6 +63,9 @@ function parseArgs(argv) {
     reportBug: null,
     exportRedactedWorkbook: null,
     help: false,
+    enableTelemetry: false,
+    disableTelemetry: false,
+    telemetryStatus: false,
   };
   let i = 0;
   while (i < argv.length) {
@@ -85,6 +88,9 @@ function parseArgs(argv) {
     else if (arg === '--max-tokens')  { opts.maxTokens = parseInt(argv[++i], 10); }
     else if (arg === '--report-bug')              { opts.reportBug = argv[++i]; }
     else if (arg === '--export-redacted-workbook'){ opts.exportRedactedWorkbook = argv[++i]; }
+    else if (arg === '--enable-telemetry')        opts.enableTelemetry = true;
+    else if (arg === '--disable-telemetry')       opts.disableTelemetry = true;
+    else if (arg === '--telemetry-status')        opts.telemetryStatus = true;
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else                                opts.positional.push(arg);
     i++;
@@ -147,6 +153,21 @@ Bug reporting (privacy-by-design — no data leaves your machine):
                     strings→"x", bools→false, dates→1900-01-01). Formulas,
                     structure, styles, named ranges preserved. Optional
                     attachment for hard-to-repro bugs.
+
+Crash telemetry (opt-in only):
+  --enable-telemetry
+                    Opt in to anonymous crash telemetry. Only error type,
+                    sanitized error message (paths scrubbed, ≤200 chars),
+                    tool version, Node version, and OS/arch are sent.
+                    No paths, no cell values, no identifiers.
+                    Payload: { v, ts, error_type, error_message, command,
+                               xlsx_for_ai_version, node_version, os_arch }
+                    Consent persists at ~/.xlsx-for-ai/config.json across
+                    upgrades.
+  --disable-telemetry
+                    Opt out. Config file is kept (explicit "no" is recorded).
+  --telemetry-status
+                    Show current state and config path.
 
 Misc:
   -h, --help        Show this help
@@ -1817,6 +1838,56 @@ async function main() {
   const opts = parseArgs(argv);
 
   if (opts.help) { printHelp(); process.exit(0); }
+
+  // ---------------------------------------------------------------------------
+  // Telemetry management flags — handled before crash hooks are registered.
+  // ---------------------------------------------------------------------------
+  if (opts.enableTelemetry || opts.disableTelemetry || opts.telemetryStatus) {
+    const telCfg = require('./lib/telemetry-config');
+
+    if (opts.enableTelemetry) {
+      telCfg.enableTelemetry();
+      console.log('Crash telemetry enabled.');
+      console.log('');
+      console.log('When a crash occurs, this payload will be sent:');
+      console.log(JSON.stringify({
+        v: 1,
+        ts: '<ISO-timestamp>',
+        error_type: '<e.g. TypeError>',
+        error_message: '<sanitized, ≤200 chars — paths scrubbed>',
+        command: '<first CLI arg from allowlist, or "<other>">',
+        xlsx_for_ai_version: require('./package.json').version,
+        node_version: process.version,
+        os_arch: `${process.platform}-${process.arch}`,
+      }, null, 2));
+      console.log('');
+      console.log('No paths, no cell values, no identifiers. Consent stored at:');
+      console.log(telCfg.configPath());
+      return;
+    }
+
+    if (opts.disableTelemetry) {
+      telCfg.disableTelemetry();
+      console.log('Crash telemetry disabled.');
+      console.log('Config kept at: ' + telCfg.configPath());
+      return;
+    }
+
+    if (opts.telemetryStatus) {
+      const status = telCfg.telemetryStatus();
+      console.log(`Telemetry status: ${status}`);
+      console.log(`Config path:      ${telCfg.configPath()}`);
+      return;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Register process-level crash hooks (no-op if user hasn't opted in).
+  // ---------------------------------------------------------------------------
+  {
+    const { registerCrashHooks } = require('./lib/telemetry-hooks');
+    registerCrashHooks(require('./package.json').version);
+  }
 
   // Bug-report and redacted-workbook modes consume their input via the
   // flag itself, so they bypass the normal positional / loader path.
