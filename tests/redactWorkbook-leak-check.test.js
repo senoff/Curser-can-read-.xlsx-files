@@ -16,11 +16,19 @@ const path = require('node:path');
 const os = require('node:os');
 const JSZip = require('jszip');
 const engine = require('../lib/engine');
-const { exportRedactedWorkbook, _redactCoreXml, _redactAppXml, _redactCustomPropsXml } = require('../lib/redactWorkbook');
+const { exportRedactedWorkbook, _redactCoreXml, _redactAppXml, _redactCustomPropsXml, _TRANSPARENT_1X1_PNG } = require('../lib/redactWorkbook');
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
+
+// Synthetic PNG: the PNG magic bytes + a recognizable payload we can grep for.
+// We don't need a fully valid PNG here — just something with PNG magic bytes
+// and a distinguishable body that the redactor must not pass through.
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // \x89PNG\r\n\x1a\n
+// Add a fake unique payload after the magic bytes so we can confirm the
+// original bytes don't survive (the placeholder is a different buffer).
+const FAKE_PNG_PAYLOAD = Buffer.concat([PNG_MAGIC, Buffer.from('FAKE-IMAGE-DATA-DO-NOT-LEAK', 'utf8')]);
 
 const SENSITIVE_EMAIL = 'alice@example.com';
 const SENSITIVE_PASSWORD = 'hunter2';
@@ -101,6 +109,9 @@ async function injectDocProps(xlsxPath) {
 
   zip.file('docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Microsoft Excel</Application><Company>${SENSITIVE_COMPANY}</Company><Manager>${SENSITIVE_LAST_MOD}</Manager></Properties>`);
+
+  // Inject a synthetic media file with recognisable bytes to test xl/media/ stripping.
+  zip.file('xl/media/image1.png', FAKE_PNG_PAYLOAD);
 
   const out = await zip.generateAsync({
     type: 'nodebuffer',
@@ -311,4 +322,49 @@ test('_redactCustomPropsXml: strips custom property values', () => {
   const out = _redactCustomPropsXml(input);
   assert.ok(!out.includes('SECRET-PROJECT-X'), 'custom property value must be stripped');
   assert.ok(out.includes('ProjectCode'), 'property name must survive');
+});
+
+// ---------------------------------------------------------------------------
+// Test 10 — xl/media/ binaries stripped (follow-up to #20)
+// ---------------------------------------------------------------------------
+
+test('xl/media/: embedded image bytes do not survive redaction', async () => {
+  // The fixture already has xl/media/image1.png injected with FAKE_PNG_PAYLOAD
+  // (see injectDocProps). Verify the output contains the entry (ZIP remains
+  // structurally intact) but the original bytes are gone.
+  const buf = fs.readFileSync(redactedPath);
+  const zip = await JSZip.loadAsync(buf);
+
+  const mediaEntry = zip.file('xl/media/image1.png');
+  assert.ok(mediaEntry, 'xl/media/image1.png must still exist in ZIP (structural integrity)');
+
+  const outBytes = await mediaEntry.async('nodebuffer');
+
+  // Original fake payload must not survive.
+  const originalPayload = Buffer.from('FAKE-IMAGE-DATA-DO-NOT-LEAK', 'utf8');
+  assert.equal(
+    outBytes.indexOf(originalPayload),
+    -1,
+    'Original image bytes must not survive in redacted output',
+  );
+
+  // Replacement must be the transparent PNG placeholder (or at least have
+  // PNG magic bytes — confirming it was replaced with valid PNG, not just
+  // wiped to empty which would break drawing rels).
+  assert.ok(
+    outBytes.length > 0,
+    'Replacement entry must not be empty (would break drawing relationships)',
+  );
+  assert.equal(
+    outBytes.slice(0, 4).toString('hex'),
+    '89504e47', // PNG magic bytes \x89PNG
+    'Replacement must start with PNG magic bytes',
+  );
+
+  // Confirm the placeholder is the _TRANSPARENT_1X1_PNG constant.
+  assert.deepEqual(
+    outBytes,
+    _TRANSPARENT_1X1_PNG,
+    'Replacement must equal the TRANSPARENT_1X1_PNG placeholder',
+  );
 });
