@@ -92,3 +92,7 @@ Spreadsheet libraries are designed for developers building software *on top of* 
 `xlsx-for-ai` is the first one built specifically for that. The output is shaped for an LLM's context window — markdown tables when the model just needs to read, structured JSON when it needs to reason, token-aware truncation when the spreadsheet is too big to fit, and a real `.xlsx` writer that produces a file you can hand back to a human along with a built-in note explaining everything that changed.
 
 It's a small tool. It just happens to fix the one thing standing between AI assistants and the file format most knowledge work actually lives in.
+
+## Privacy contract
+
+We never auto-send workbook data. Anonymous crash telemetry is opt-in via `xlsx-for-ai --enable-telemetry`; even then, we receive only error type, error message (sanitized — paths scrubbed, capped at 200 chars), and tool/Node/OS version — no paths, no cell values, no identifiers. Nothing leaves your machine unless you choose to enable it.

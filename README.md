@@ -318,7 +318,22 @@ A future release may apply these dep upgrades via `patch-package` so they travel
 
 ## Reporting bugs
 
-**The privacy contract: we never auto-send your data.** xlsx-for-ai has no telemetry endpoint and no consent dialog to maintain — there's nothing to opt out of, because nothing leaves your machine unless you choose to attach it to a GitHub issue.
+**The privacy contract: we never auto-send workbook data.** Anonymous crash telemetry is opt-in via `--enable-telemetry`; even then, we receive only error type, error message (sanitized — paths scrubbed, capped at 200 chars), tool version, Node version, and OS/arch. No paths, no cell values, no identifiers.
+
+To enable or manage crash telemetry:
+
+```bash
+# Opt in — prints the exact payload schema so you can see what gets sent
+xlsx-for-ai --enable-telemetry
+
+# Opt out
+xlsx-for-ai --disable-telemetry
+
+# Check current state and config path
+xlsx-for-ai --telemetry-status
+```
+
+Consent is stored at `~/.xlsx-for-ai/config.json` and persists across `npm install -g xlsx-for-ai@latest` upgrades. If the telemetry shape ever changes, the tool pauses sending and prompts you to re-opt-in — we never silently expand what we collect under old consent.
 
 When something breaks on a real workbook, two flags help us reproduce locally without asking you to share the original file:
 
