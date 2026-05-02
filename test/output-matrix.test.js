@@ -17,7 +17,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const ExcelJS = require('@protobi/exceljs');
+// Route through the engine seam: fixture construction uses createWorkbook()
+// + writeWorkbook() so this test file never binds directly to @protobi/exceljs.
+const engine = require('../lib/engine');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CLI = path.join(REPO_ROOT, 'index.js');
@@ -29,7 +31,7 @@ test.before(async () => {
   TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xfa-matrix-'));
   FIXTURE = path.join(TMP_DIR, 'all-cell-types.xlsx');
 
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const ws = wb.addWorksheet('Data');
   // Headers (row 1)
   ws.getCell('A1').value = 'kind';
@@ -46,7 +48,7 @@ test.before(async () => {
   ws.getCell('A10').value = 'hyperlink';    ws.getCell('B10').value = { text: 'click', hyperlink: 'https://example.com' };
   ws.getCell('A11').value = 'boolean';      ws.getCell('B11').value = true;
 
-  await wb.xlsx.writeFile(FIXTURE);
+  await engine.writeWorkbook(wb, FIXTURE);
 });
 
 test.after(() => {
@@ -170,13 +172,13 @@ for (const modeArgs of [['--stdout'], ['--md', '--stdout'], ['--json', '--stdout
     // Generate large fixture by writing a lot of rows
     const big = path.join(TMP_DIR, `big-${modeArgs.join('-').replace(/-/g,'_')}.xlsx`);
     // synchronously build a fat workbook inline
-    const wb = new ExcelJS.Workbook();
+    const wb = engine.createWorkbook();
     const ws = wb.addWorksheet('Big');
     ws.getCell('A1').value = 'header';
     for (let r = 2; r <= 100; r++) {
       ws.getCell(`A${r}`).value = `lorem ipsum dolor sit amet ${r}`.repeat(5);
     }
-    return wb.xlsx.writeFile(big).then(() => {
+    return engine.writeWorkbook(wb, big).then(() => {
       const full = runCli([big, ...modeArgs]);
       const truncated = runCli([big, ...modeArgs, '--max-tokens', '200']);
       assert.ok(truncated.length < full.length,

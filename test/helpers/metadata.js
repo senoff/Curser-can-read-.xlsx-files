@@ -6,7 +6,10 @@
 
 'use strict';
 
-const ExcelJS = require('@protobi/exceljs');
+// Route through the engine seam so metadata.js never binds directly to
+// @protobi/exceljs. The returned workbook is still an ExcelJS object; the
+// seam centralises which engine produces it.
+const engine = require('../../lib/engine');
 
 function colLetter(n) {
   let s = '';
@@ -16,9 +19,7 @@ function colLetter(n) {
 }
 
 async function loadWorkbook(filePath) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(filePath);
-  return wb;
+  return engine.loadWorkbook(filePath);
 }
 
 function snapshotSheet(ws) {

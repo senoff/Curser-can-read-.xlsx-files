@@ -4,12 +4,15 @@
 
 'use strict';
 
-const ExcelJS = require('@protobi/exceljs');
+// Route through the engine seam: createWorkbook() + writeWorkbook() are the
+// seam's write-path API. Using the seam here means fixture generation will
+// automatically use the same engine as production code.
+const engine = require('../../lib/engine');
 const path = require('path');
 
 // Fixture #1: minimal — values, formulas, dates. The "happy path."
 async function basicValues(outDir) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const ws = wb.addWorksheet('Sales');
   ws.getCell('A1').value = 'Region';
   ws.getCell('B1').value = 'Q1';
@@ -29,12 +32,12 @@ async function basicValues(outDir) {
   ws.getColumn(2).width = 10;
   ws.getColumn(3).width = 10;
   ws.getColumn(4).width = 12;
-  await wb.xlsx.writeFile(path.join(outDir, 'basic-values.xlsx'));
+  await engine.writeWorkbook(wb, path.join(outDir, 'basic-values.xlsx'));
 }
 
 // Fixture #2: column widths + frozen panes + hidden columns
 async function widthsAndLayout(outDir) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const ws = wb.addWorksheet('Layout');
   for (let c = 1; c <= 6; c++) {
     ws.getColumn(c).width = 8 + c * 2; // 10, 12, 14, 16, 18, 20
@@ -47,12 +50,12 @@ async function widthsAndLayout(outDir) {
       ws.getCell(r, c).value = r * 100 + c;
     }
   }
-  await wb.xlsx.writeFile(path.join(outDir, 'widths-layout.xlsx'));
+  await engine.writeWorkbook(wb, path.join(outDir, 'widths-layout.xlsx'));
 }
 
 // Fixture #3: merged cells + named ranges + auto-filter
 async function mergesAndNames(outDir) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const ws = wb.addWorksheet('Report');
   ws.getCell('A1').value = 'Q4 2025 Summary';
   ws.mergeCells('A1:D1');
@@ -72,12 +75,12 @@ async function mergesAndNames(outDir) {
   // Workbook-level named ranges
   wb.definedNames.add('Report!$D$3:$D$4', 'Variances');
   wb.definedNames.add('Report!$B$3:$C$4', 'PlanActual');
-  await wb.xlsx.writeFile(path.join(outDir, 'merges-names.xlsx'));
+  await engine.writeWorkbook(wb, path.join(outDir, 'merges-names.xlsx'));
 }
 
 // Fixture #4: multi-sheet with cross-sheet formulas
 async function multiSheet(outDir) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const detail = wb.addWorksheet('Detail');
   detail.getCell('A1').value = 'Item';
   detail.getCell('B1').value = 'Amount';
@@ -94,12 +97,12 @@ async function multiSheet(outDir) {
   summary.getCell('A2').value = 'Count';
   summary.getCell('B2').value = { formula: 'COUNTA(Detail!A2:A4)', result: 3 };
 
-  await wb.xlsx.writeFile(path.join(outDir, 'multi-sheet.xlsx'));
+  await engine.writeWorkbook(wb, path.join(outDir, 'multi-sheet.xlsx'));
 }
 
 // Fixture #5: hidden rows + comments + hyperlinks
 async function annotations(outDir) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
   const ws = wb.addWorksheet('Annotated');
   ws.getCell('A1').value = 'Item';
   ws.getCell('B1').value = 'Link';
@@ -109,7 +112,7 @@ async function annotations(outDir) {
   ws.getCell('A4').value = 'this row is hidden';
   ws.getRow(4).hidden = true;
   ws.getCell('A5').value = 'Visible again';
-  await wb.xlsx.writeFile(path.join(outDir, 'annotations.xlsx'));
+  await engine.writeWorkbook(wb, path.join(outDir, 'annotations.xlsx'));
 }
 
 const FIXTURES = {
