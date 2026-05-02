@@ -16,7 +16,16 @@ const path = require('node:path');
 const os = require('node:os');
 const JSZip = require('jszip');
 const engine = require('../lib/engine');
-const { exportRedactedWorkbook, _redactCoreXml, _redactAppXml, _redactCustomPropsXml, _TRANSPARENT_1X1_PNG } = require('../lib/redactWorkbook');
+const {
+  exportRedactedWorkbook,
+  _redactCoreXml,
+  _redactAppXml,
+  _redactCustomPropsXml,
+  _redactCommentsXml,
+  _redactThreadedCommentsXml,
+  _redactPersonsXml,
+  _TRANSPARENT_1X1_PNG,
+} = require('../lib/redactWorkbook');
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -322,6 +331,86 @@ test('_redactCustomPropsXml: strips custom property values', () => {
   const out = _redactCustomPropsXml(input);
   assert.ok(!out.includes('SECRET-PROJECT-X'), 'custom property value must be stripped');
   assert.ok(out.includes('ProjectCode'), 'property name must survive');
+});
+
+// C1 regression: numeric custom-property types (vt:r4/r8/i4/etc.) must be redacted.
+test('_redactCustomPropsXml: numeric vt types (r8, i4, ui8, filetime) are stripped', () => {
+  const cases = [
+    ['vt:r8', '123456.78'],
+    ['vt:r4', '3.14'],
+    ['vt:i4', '987654321'],
+    ['vt:i8', '1234567890123'],
+    ['vt:ui8', '9999999999'],
+    ['vt:bool', 'true'],
+    ['vt:filetime', '2024-01-15T09:00:00Z'],
+  ];
+  for (const [tag, value] of cases) {
+    const input = `<Properties><property name="X"><${tag}>${value}</${tag}></property></Properties>`;
+    const out = _redactCustomPropsXml(input);
+    assert.ok(
+      !out.includes(value),
+      `${tag} value "${value}" must be stripped, got ${JSON.stringify(out)}`,
+    );
+    assert.ok(out.includes(`<${tag}>`), `${tag} open tag must survive`);
+    assert.ok(out.includes(`</${tag}>`), `${tag} close tag must survive`);
+  }
+});
+
+// C1 regression: nested vt:variant > vt:lpwstr must produce well-formed XML.
+test('_redactCustomPropsXml: nested vt:variant > vt:lpwstr stays well-formed', () => {
+  const input = `<Properties><property name="V"><vt:variant><vt:lpwstr>SECRET</vt:lpwstr></vt:variant></property></Properties>`;
+  const out = _redactCustomPropsXml(input);
+  assert.ok(!out.includes('SECRET'), 'nested vt:lpwstr value must be stripped');
+  // Old regex would have matched <vt:variant>...</vt:lpwstr> producing mangled tags.
+  // Verify the structure is intact: <vt:variant><vt:lpwstr></vt:lpwstr></vt:variant>
+  assert.ok(out.includes('<vt:variant>'), 'outer vt:variant open tag survives');
+  assert.ok(out.includes('</vt:variant>'), 'outer vt:variant close tag survives');
+  assert.ok(out.includes('<vt:lpwstr>'), 'inner vt:lpwstr open tag survives');
+  assert.ok(out.includes('</vt:lpwstr>'), 'inner vt:lpwstr close tag survives');
+  // No mangled tag like </vt:variant><vt:variant> or stray attributes.
+  const variantOpens = (out.match(/<vt:variant\b/g) || []).length;
+  const variantCloses = (out.match(/<\/vt:variant>/g) || []).length;
+  assert.equal(variantOpens, variantCloses, 'vt:variant open/close counts must match');
+  const lpwstrOpens = (out.match(/<vt:lpwstr\b/g) || []).length;
+  const lpwstrCloses = (out.match(/<\/vt:lpwstr>/g) || []).length;
+  assert.equal(lpwstrOpens, lpwstrCloses, 'vt:lpwstr open/close counts must match');
+});
+
+// C2 regression: legacy comment authors must be scrubbed.
+test('_redactCommentsXml: <author> display names are scrubbed', () => {
+  const input = `<comments><authors><author>Alice Smith</author><author>Bob Reporter</author></authors><commentList><comment ref="A1" authorId="0"><text><r><t>note</t></r></text></comment></commentList></comments>`;
+  const out = _redactCommentsXml(input);
+  assert.ok(!out.includes('Alice Smith'), 'first author must be scrubbed');
+  assert.ok(!out.includes('Bob Reporter'), 'second author must be scrubbed');
+  assert.ok(out.includes('<author>x</author>'), 'author tag should retain placeholder "x"');
+  // <t> payload "note" must also be redacted by the existing branch.
+  assert.ok(!out.includes('>note<'), 'comment body text must remain redacted');
+});
+
+// C3 regression: xl/persons/person.xml identifying attributes scrubbed.
+test('_redactPersonsXml: displayName, userId, providerId attributes scrubbed', () => {
+  const input = `<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"><person displayName="Alice Smith" id="{abcd-ef}" userId="alice@company.com" providerId="AzureAD"/></personList>`;
+  const out = _redactPersonsXml(input);
+  assert.ok(!out.includes('Alice Smith'), 'displayName must be scrubbed');
+  assert.ok(!out.includes('alice@company.com'), 'userId must be scrubbed');
+  assert.ok(!out.includes('AzureAD'), 'providerId must be scrubbed');
+  // id (UUID) must survive so threadedComment authorId references resolve.
+  assert.ok(out.includes('{abcd-ef}'), 'id (UUID) must survive');
+  assert.ok(out.includes('displayName="x"'), 'displayName placeholder present');
+  assert.ok(out.includes('userId="x"'), 'userId placeholder present');
+  assert.ok(out.includes('providerId="x"'), 'providerId placeholder present');
+});
+
+// H1 regression: single-quoted text="..." attribute on threadedComments.
+test('_redactThreadedCommentsXml: handles both double-quoted and single-quoted text=', () => {
+  const dq = `<threadedComment id="x" text="DOUBLE-QUOTED-SECRET"/>`;
+  const sq = `<threadedComment id="x" text='SINGLE-QUOTED-SECRET'/>`;
+  const out1 = _redactThreadedCommentsXml(dq);
+  const out2 = _redactThreadedCommentsXml(sq);
+  assert.ok(!out1.includes('DOUBLE-QUOTED-SECRET'), 'double-quoted body must be scrubbed');
+  assert.ok(!out2.includes('SINGLE-QUOTED-SECRET'), 'single-quoted body must be scrubbed');
+  assert.ok(out1.includes('text="x"'), 'double-quoted form replaced with text="x"');
+  assert.ok(out2.includes('text="x"'), 'single-quoted form replaced with text="x"');
 });
 
 // ---------------------------------------------------------------------------
