@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const JSZip = require('jszip');
-const ExcelJS = require('@protobi/exceljs');
+const engine = require('../lib/engine');
 
 const { build } = require('./fixtures/build');
 const { exportRedactedWorkbook } = require('../lib/redactWorkbook');
@@ -44,8 +44,7 @@ test('redacted file exists and is a valid zip', async () => {
 });
 
 test('structure preserved: sheet count, names, merges, defined names', async () => {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(redactedPath);
+  const wb = await engine.loadWorkbook(redactedPath);
   assert.equal(wb.worksheets.length, 3);
   assert.deepEqual(wb.worksheets.map((w) => w.name), ['Sales', 'Config', 'Empty']);
 
@@ -57,8 +56,7 @@ test('structure preserved: sheet count, names, merges, defined names', async () 
 });
 
 test('formulas preserved: D2, D3 still carry their formula text', async () => {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(redactedPath);
+  const wb = await engine.loadWorkbook(redactedPath);
   const sales = wb.getWorksheet('Sales');
   const d2 = sales.getCell('D2').value;
   const d3 = sales.getCell('D3').value;
@@ -70,8 +68,7 @@ test('formulas preserved: D2, D3 still carry their formula text', async () => {
 });
 
 test('numeric cells redacted to 0', async () => {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(redactedPath);
+  const wb = await engine.loadWorkbook(redactedPath);
   const sales = wb.getWorksheet('Sales');
   // B2 was 100 in the fixture.
   assert.equal(sales.getCell('B2').value, 0, 'B2 must be redacted to 0');
@@ -79,8 +76,7 @@ test('numeric cells redacted to 0', async () => {
 });
 
 test('string cells redacted to "x"', async () => {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(redactedPath);
+  const wb = await engine.loadWorkbook(redactedPath);
   const sales = wb.getWorksheet('Sales');
   // A1 was "Region" in the fixture.
   const v = sales.getCell('A1').value;
@@ -90,8 +86,7 @@ test('string cells redacted to "x"', async () => {
 });
 
 test('boolean cell redacted to false', async () => {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(redactedPath);
+  const wb = await engine.loadWorkbook(redactedPath);
   const config = wb.getWorksheet('Config');
   // B2 was `true` in the fixture.
   // ExcelJS reads numeric 0 as 0; booleans live in t="b" cells which we

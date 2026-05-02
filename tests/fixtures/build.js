@@ -12,10 +12,10 @@
 // Run: node tests/fixtures/build.js
 
 const path = require('path');
-const ExcelJS = require('@protobi/exceljs');
+const engine = require('../../lib/engine');
 
 async function build(outPath) {
-  const wb = new ExcelJS.Workbook();
+  const wb = engine.createWorkbook();
 
   const s1 = wb.addWorksheet('Sales');
   s1.getCell('A1').value = 'Region';
