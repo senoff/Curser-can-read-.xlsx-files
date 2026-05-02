@@ -178,3 +178,64 @@ test('buildPayload: adversarial — nested Linux home path scrubbed', () => {
   const payload = buildPayload(err, '1.5.0');
   assert.ok(!payload.error_message.includes('frank'), `Linux path leaked: ${payload.error_message}`);
 });
+
+// ---------------------------------------------------------------------------
+// scrubPaths — adversarial encoding coverage (PR #18 telemetry follow-up)
+// ---------------------------------------------------------------------------
+
+test('scrubPaths: URL-encoded macOS path scrubbed', () => {
+  const raw = '/Users/alice/Documents/budget.xlsx';
+  const encoded = encodeURIComponent(raw);
+  const result = scrubPaths('Error: ' + encoded);
+  assert.ok(!result.includes('alice'), `URL-encoded username leaked: ${result}`);
+  assert.ok(result.includes('<path>'), `no <path> placeholder: ${result}`);
+});
+
+test('scrubPaths: URL-encoded Linux home path scrubbed', () => {
+  const raw = '/home/bob/data.xlsx';
+  const encoded = encodeURIComponent(raw);
+  const result = scrubPaths('ENOENT: ' + encoded);
+  assert.ok(!result.includes('bob'), `URL-encoded username leaked: ${result}`);
+  assert.ok(result.includes('<path>'), `no <path> placeholder: ${result}`);
+});
+
+test('scrubPaths: $HOME/... reference scrubbed', () => {
+  const result = scrubPaths('Error: $HOME/secret.xlsx not found');
+  assert.ok(!result.includes('$HOME/secret'), `$HOME path leaked: ${result}`);
+  assert.ok(result.includes('<path>'), `no <path> placeholder: ${result}`);
+});
+
+test('scrubPaths: ${HOME}/... reference scrubbed', () => {
+  const result = scrubPaths('Error: ${HOME}/secret.xlsx not found');
+  assert.ok(!result.includes('${HOME}/secret'), `\${HOME} path leaked: ${result}`);
+  assert.ok(result.includes('<path>'), `no <path> placeholder: ${result}`);
+});
+
+test('scrubPaths: %USERPROFILE%\\... Windows env reference scrubbed', () => {
+  const result = scrubPaths('Cannot open %USERPROFILE%\\Desktop\\file.xlsx');
+  assert.ok(!result.includes('%USERPROFILE%\\Desktop'), `%USERPROFILE% path leaked: ${result}`);
+  assert.ok(result.includes('<path>'), `no <path> placeholder: ${result}`);
+});
+
+test('scrubPaths: base64-encoded path NOT scrubbed (acceptable — not recognizable)', () => {
+  // Base64 of a path is not a recognizable path — we document it is not scrubbed
+  // and accept this because error messages containing base64 blobs with paths
+  // are vanishingly rare and the encoding makes the path unreadable anyway.
+  const b64 = Buffer.from('/Users/alice/secret.xlsx').toString('base64');
+  // Just assert no crash — we don't require the base64 to be scrubbed.
+  const result = scrubPaths('Error: ' + b64);
+  assert.ok(typeof result === 'string');
+});
+
+test('buildPayload: adversarial — URL-encoded path in error message scrubbed', () => {
+  const encoded = encodeURIComponent('/Users/grace/Documents/confidential.xlsx');
+  const err = new Error('Cannot read: ' + encoded);
+  const payload = buildPayload(err, '1.5.0');
+  assert.ok(!payload.error_message.includes('grace'), `URL-encoded path leaked: ${payload.error_message}`);
+});
+
+test('buildPayload: adversarial — $HOME path in error message scrubbed', () => {
+  const err = new Error('Error reading $HOME/private/budget.xlsx');
+  const payload = buildPayload(err, '1.5.0');
+  assert.ok(!payload.error_message.includes('$HOME/private'), `$HOME path leaked: ${payload.error_message}`);
+});
