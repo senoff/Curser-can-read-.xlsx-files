@@ -317,6 +317,27 @@ Run `rm -rf node_modules package-lock.json && npm install` and the warnings will
 
 A future release may apply these dep upgrades via `patch-package` so they travel through the dep graph automatically. The infrastructure is in place; the patches haven't been needed urgently because most installs are CLI-direct.
 
+### Audit findings on install (what's inherited from upstream)
+
+When you `npm install xlsx-for-ai` (especially as a library dep, not the top-level project), `npm audit` may surface one or more advisories. Most are inherited transitively from `@protobi/exceljs` and the legacy `xlsx` fallback parser. Each one has been triaged and is documented in [`.github/audit-allowlist.json`](.github/audit-allowlist.json), which is the canonical list our CI's `audit.yml` job reads.
+
+Each allowlist entry includes:
+
+- **`ghsa`** — the advisory ID (e.g. `GHSA-w5hq-g745-h8pq`).
+- **`package`** — the dependency the advisory lives on.
+- **`severity`** — the advisory's published severity.
+- **`reason`** — why the finding is accepted, including the code path's reachability in our usage.
+- **`reassess`** — the date by which we will re-evaluate (typically a quarterly cadence).
+- **`owner`** — who owns the re-evaluation.
+
+The current set covers two `xlsx` advisories (the npm-published 0.18.5 line is unmaintained; we carry it as a fallback parser only) and one `uuid` advisory inherited from ExcelJS (`v4()` call sites in ExcelJS do not pass a pre-allocated buffer, so the bounds-check gap is unreachable here). An upstream gift PR is open to bump uuid in the protobi fork; once merged and released, the `uuid` line will drop on the next `@protobi/exceljs` update.
+
+If you embed xlsx-for-ai in a product with stricter audit policies than ours, you have three clean options:
+
+1. **Mirror the allowlist entries** into your own audit configuration (e.g. `npm audit --omit=dev` filters, Snyk policy file, GitHub Dependabot ignore rules) using the same `ghsa` IDs.
+2. **Pin to a future xlsx-for-ai release** that bumps `@protobi/exceljs` past the upstream uuid bump (will drop the `uuid` advisory automatically; tracked in the allowlist's `reassess` date).
+3. **Vendor the parser path you actually use** — if you only need the modern `@protobi/exceljs` engine and not the legacy `xlsx` fallback, you can disable the fallback in your wrapper and the `xlsx` advisories cease to apply to your dep graph.
+
 ## Reporting bugs
 
 **The privacy contract: we never auto-send workbook data.** Anonymous crash telemetry is opt-in via `--enable-telemetry`; even then, we receive only error type, error message (sanitized — paths scrubbed, capped at 200 chars), tool version, Node version, and OS/arch. No paths, no cell values, no identifiers.
