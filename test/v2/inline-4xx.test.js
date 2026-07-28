@@ -124,6 +124,18 @@ test('extension-anchored redaction terminates on trailing punctuation (no leak)'
   }
 });
 
+test('a quote INSIDE a filename does not leak the path tail (inner excludes only newline)', () => {
+  for (const [msg, leak] of [
+    ["could not read /Users/obrien/O'Brien budget.xlsx now", 'obrien'],
+    ["bad file /data/it's a report.csv here", "it's a report"],
+    ['open C:\\Users\\d\'angelo\\book.xlsx please', 'angelo'],
+  ]) {
+    const out = surface4xx('t', clientErr({ status: 400, payload: { error: { message: msg } } }));
+    assert.ok(!out.includes(leak), `quote-in-filename must not leak (${msg}); got: ${out}`);
+    assert.ok(out.includes('<path>'), `expected <path> (${msg}); got: ${out}`);
+  }
+});
+
 test('path redaction fires regardless of the char immediately BEFORE the path', () => {
   // The left boundary rejects only URL markers (`:` `/` host-char), so a path
   // preceded by a backtick, `=`, `(`, or `<` is still redacted.
