@@ -124,6 +124,28 @@ test('extension-anchored redaction terminates on trailing punctuation (no leak)'
   }
 });
 
+test('path redaction fires regardless of the char immediately BEFORE the path', () => {
+  // The left boundary rejects only URL markers (`:` `/` host-char), so a path
+  // preceded by a backtick, `=`, `(`, or `<` is still redacted.
+  for (const [msg, leak] of [
+    ['see `/data/priv/report.xlsx` for detail', 'priv'],
+    ['path=/data/customer/x.csv failed', 'customer'],
+    ['(/srv/www/app/secret.env)', 'secret.env'],
+    ['<config>/etc/app/db.conf</config>', '/etc/app/db.conf'],
+  ]) {
+    const out = surface4xx('t', clientErr({ status: 400, payload: { error: { message: msg } } }));
+    assert.ok(!out.includes(leak), `left-boundary must not block redaction (${msg}); got: ${out}`);
+    assert.ok(out.includes('<path>'), `expected <path> (${msg}); got: ${out}`);
+  }
+});
+
+test('terminator covers braces/angle-brackets and non-ASCII extensions', () => {
+  const brace = surface4xx('t', clientErr({ status: 400, payload: { error: { message: 'json {"file":"/data/x/report.xlsx"}' } } }));
+  assert.ok(!brace.includes('report.xlsx') && brace.includes('<path>'), `brace boundary; got: ${brace}`);
+  const nonAscii = surface4xx('t', clientErr({ status: 400, payload: { error: { message: 'open /data/файл.данные now' } } }));
+  assert.ok(!nonAscii.includes('файл') && nonAscii.includes('<path>'), `non-ASCII extension; got: ${nonAscii}`);
+});
+
 test('multi-dot extensions (.tar.gz) are redacted as one path token', () => {
   const out = surface4xx('t', clientErr({
     status: 400,
