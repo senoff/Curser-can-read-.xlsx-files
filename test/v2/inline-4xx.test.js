@@ -111,7 +111,29 @@ test('extension-anchored redaction is root-agnostic (non-allowlist POSIX root)',
   assert.ok(out.includes('could not open') && out.includes('now'), `prose survives; got: ${out}`);
 });
 
-test('a URL is NOT eaten by the POSIX path pass (word-boundary lookbehind)', () => {
+test('extension-anchored redaction terminates on trailing punctuation (no leak)', () => {
+  for (const [msg, leak] of [
+    ['could not open /data/tenant42/export.csv, retrying', 'tenant42'],
+    ['bad file /data/x/report.xlsx.', 'report.xlsx'],
+    ['see /home/alice/notes.txt; then stop', 'alice'],
+    ['load C:\\data\\book.xlsx, then', 'book.xlsx'],
+  ]) {
+    const out = surface4xx('t', clientErr({ status: 400, payload: { error: { message: msg } } }));
+    assert.ok(!out.includes(leak), `punctuation boundary must not leak (${msg}); got: ${out}`);
+    assert.ok(out.includes('<path>'), `expected <path> (${msg}); got: ${out}`);
+  }
+});
+
+test('multi-dot extensions (.tar.gz) are redacted as one path token', () => {
+  const out = surface4xx('t', clientErr({
+    status: 400,
+    payload: { error: { message: 'archive /var/backups/db.tar.gz is corrupt' } },
+  }));
+  assert.ok(!out.includes('db.tar.gz') && !out.includes('backups'), `got: ${out}`);
+  assert.ok(out.includes('<path>') && out.includes('is corrupt'), `prose survives; got: ${out}`);
+});
+
+test('a URL is NOT eaten by the POSIX path pass (leading-boundary anchor, no lookbehind)', () => {
   const out = surface4xx('t', clientErr({
     status: 400,
     payload: { error: { message: 'see https://api.example.com/data/report.json for the schema' } },
