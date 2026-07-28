@@ -17,6 +17,7 @@ const { ensureRegistered } = require('./lib/register');
 const { callTool, setMcpClientInfo } = require('./lib/client');
 const { resolveCatalog }   = require('./lib/discover');
 const { applyAnnotations, sanitizeForMcp } = require('./lib/annotations');
+const { surface4xx } = require('./lib/inline-4xx');
 const fs                   = require('fs');
 const fsPromises           = require('fs/promises');
 const os                   = require('os');
@@ -1422,59 +1423,16 @@ async function applyFileB64(result, outPath) {
 // reveal at the boundary.
 // ---------------------------------------------------------------------------
 
-// Defense in depth on the 4xx inline message. The SPEC's bet is that
-// 4xx server messages describe the CALLER'S OWN INPUT (which field,
-// what was expected) — but a wrapped 4xx path could still carry
-// absolute file paths, emails, JWTs / Bearer tokens, Slack tokens,
-// or other PII. Scrub those before surfacing, replace with `<…>`
-// placeholders so the caller still sees the SHAPE of the message
-// without the sensitive payload.
-//
-// `<…>` was picked over a more verbose `[redacted-x]` so it's
-// visually compact and unambiguously not real input.
-const PII_SCRUBBERS = [
-  // Bearer / Authorization tokens — match before generic JWT pattern.
-  [/\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/g, '<bearer>'],
-  // JSON Web Tokens. Three dot-separated base64url segments, the first
-  // starting with `eyJ` (the canonical JWT header prefix).
-  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '<jwt>'],
-  // Slack bot / user / app tokens.
-  [/\bxox[bpoars]-[A-Za-z0-9-]{10,}\b/g, '<slack-token>'],
-  // Our own API keys.
-  [/\bxfa_[a-z]+_[A-Za-z0-9]{16,}\b/g, '<xfa-key>'],
-  // Generic 32+ char hex (api keys / hashes).
-  [/\b[a-f0-9]{32,}\b/gi, '<hex>'],
-  // Emails.
-  [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '<email>'],
-  // POSIX absolute paths under /Users, /home, /var, /opt, /tmp, /etc, /private.
-  [/\/(?:Users|home|var|opt|tmp|etc|private)\/[^\s'"`)\]]+/g, '<path>'],
-  // Windows absolute paths.
-  [/[A-Za-z]:\\[^\s'"`)\]]+/g, '<path>'],
-];
-
-// Strip the well-known low-signal noise an inline 4xx surface message
-// could carry: leading "xlsx-for-ai API error 4xx: " prefix from
-// lib/client.js, scrub PII via PII_SCRUBBERS, bound the length so a
-// pathological payload can't blow up the conversation log.
-const INLINE_4XX_MAX_LEN = 280;
-function shapeInline4xxMessage(raw) {
-  if (typeof raw !== 'string') return '';
-  let s = raw.replace(/^xlsx-for-ai API error \d+:\s*/i, '').trim();
-  for (const [pattern, replacement] of PII_SCRUBBERS) {
-    s = s.replace(pattern, replacement);
-  }
-  if (s.length > INLINE_4XX_MAX_LEN) {
-    s = s.slice(0, INLINE_4XX_MAX_LEN - 1) + '…';
-  }
-  return s;
-}
+// The 4xx inline-surface sanitizer + surfacer live in ./lib/inline-4xx.js
+// so the CLI path (index.js `friendlyCliError`) shares the exact same
+// sanitizer — one implementation, no drifting second fork. See that
+// module for the PII-scrubbing / length-bounding rationale.
 
 function friendlyErrorMessage(toolName, err) {
-  // err may be undefined (defensive) or any thrown value. Extract the
-  // fields we care about safely.
+  // err may be undefined (defensive) or any thrown value. The 4xx status/
+  // payload are read inside surface4xx (./lib/inline-4xx.js); here we only
+  // dispatch on the code.
   const code = err && err.code;
-  const status = err && err.status;
-  const payload = err && err.payload;
 
   // Known client-side / mcp.js error codes — keep their pre-existing
   // short text. Ordered before the 4xx default so the specific message
@@ -1525,39 +1483,11 @@ function friendlyErrorMessage(toolName, err) {
   // Known specific HTTP statuses are mapped first so they keep their
   // short curated text:
   if (code === 'API_CLIENT_ERROR') {
-    if (status === 429) {
-      return `${toolName}: monthly request cap reached — resets next month.`;
-    }
-    if (status === 402) {
-      // Server emits 402 only on the not-yet-active full_bytes capture-consent
-      // path; neutralize so its subscription wording never reaches the user.
-      return `${toolName}: that capture mode is not available.`;
-    }
-    // Generic 4xx: surface the server message. Prefer the structured
-    // shape, fall through to the flat message, fall through to the
-    // wrapped err.message (stripped of the "API error 4xx:" prefix).
-    let inline = '';
-    if (payload && typeof payload === 'object') {
-      const structured = payload.error;
-      if (structured && typeof structured === 'object' && typeof structured.message === 'string') {
-        inline = structured.message;
-      } else if (typeof payload.message === 'string') {
-        inline = payload.message;
-      } else if (typeof payload.error === 'string') {
-        inline = payload.error;
-      }
-    }
-    if (!inline && err && typeof err.message === 'string') {
-      inline = err.message;
-    }
-    const shaped = shapeInline4xxMessage(inline);
-    if (shaped) {
-      return `${toolName}: ${shaped}`;
-    }
-    // Graceful fallback when no message is available (empty/absent
-    // payload, non-string fields): generic with tool name, no
-    // `undefined`, no `[object Object]`.
-    return `${toolName}: invalid request (no detail provided).`;
+    // Shared 4xx surfacer (curated 429/402 first, then the sanitized
+    // server message, then a graceful fallback) — see ./lib/inline-4xx.js.
+    // The CLI path calls the identical function so the two surfaces can't
+    // drift.
+    return surface4xx(toolName, err);
   }
 
   // 5xx and everything else — stay generic. Security boundary preserved.

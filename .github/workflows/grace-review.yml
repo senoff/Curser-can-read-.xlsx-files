@@ -6,7 +6,8 @@
 # copies instead of reinventing.
 #
 # Install:
-#   cp ~/grace/ci/grace-review.yml <repo>/.github/workflows/grace-review.yml
+#   cp ~/grace/ci/grace-review.yml   <repo>/.github/workflows/grace-review.yml
+#   cp ~/grace/ci/.grace-refutes.yml <repo>/.grace-refutes.yml   # seeds the self-CRITICAL refutes
 #   # then set GRACE_SHA / MAX_SHA below to the SHAs you intend to run.
 #
 # ---------------------------------------------------------------------------------
@@ -102,7 +103,7 @@ env:
   #
   # Every claim in this file is copied verbatim into every adopter, so it must be scoped to
   # the tense it is true in. Why that rule exists, and what it cost: senoff/grace ci/ADOPTING.md.
-  GRACE_SHA: 5fc8d164ba49f2989beef261dca76affb54ad4f0
+  GRACE_SHA: ab760363e4aca4112189477a32b59ceb5b5cbda6
   MAX_SHA:   9c42b002557b8e5755a29e588a73979b3857ccb5
 
   # OUT_DIR lives INSIDE the workspace, and every `upload-artifact` path below is written
