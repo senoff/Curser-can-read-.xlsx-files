@@ -176,6 +176,11 @@ function metaForStdout(meta) {
 // Set XFA_DEBUG=1 to see the raw underlying message (for incident triage).
 function friendlyCliError(prefix, err) {
   const code = err && err.code;
+  // XFA_DEBUG=1 is an OPT-IN, operator-set incident-triage escape hatch: it
+  // appends the raw underlying err.message (which may carry paths/stack/HTTP
+  // body) AFTER the sanitized line. Off by default, so nothing sensitive
+  // reaches stderr unless the operator deliberately asks for it. Do not wire
+  // this to anything a caller (vs. the operator) controls.
   const showRaw = process.env.XFA_DEBUG === '1';
   const base = (() => {
     switch (code) {
