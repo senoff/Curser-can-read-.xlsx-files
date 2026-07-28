@@ -21,6 +21,7 @@ const path = require('path');
 
 const { ensureRegistered } = require('./lib/register');
 const { callTool }         = require('./lib/client');
+const { surface4xx }       = require('./lib/inline-4xx');
 const {
   telemetryStatus,
   enableTelemetry,
@@ -175,11 +176,21 @@ function metaForStdout(meta) {
 // Set XFA_DEBUG=1 to see the raw underlying message (for incident triage).
 function friendlyCliError(prefix, err) {
   const code = err && err.code;
+  // XFA_DEBUG=1 is an OPT-IN, operator-set incident-triage escape hatch: it
+  // appends the raw underlying err.message (which may carry paths/stack/HTTP
+  // body) AFTER the sanitized line. Off by default, so nothing sensitive
+  // reaches stderr unless the operator deliberately asks for it. Do not wire
+  // this to anything a caller (vs. the operator) controls.
   const showRaw = process.env.XFA_DEBUG === '1';
   const base = (() => {
     switch (code) {
       case 'API_UNREACHABLE':       return `${prefix}: API is unreachable — check network connectivity.`;
       case 'API_SERVER_ERROR':      return `${prefix}: API returned a server error — retry shortly.`;
+      // 4xx: surface the server's validation message (the caller's own
+      // input shape, e.g. `Sheet "X" not found. Available sheets: ...`)
+      // through the SAME sanitizer the MCP path uses. 5xx above stays
+      // generic. XFA_DEBUG=1 still appends the raw message via `showRaw`.
+      case 'API_CLIENT_ERROR':      return surface4xx(prefix, err);
       case 'DISALLOWED_EXTENSION':  return `${prefix}: file must be a workbook (allowed: .xlsx/.xls/.xlsm/.xlsb/.csv/.ods/.fods/.numbers/.tsv).`;
       case 'FILE_TOO_LARGE':        return `${prefix}: file exceeds the XFA_MAX_FILE_MB cap (default 50 MB).`;
       case 'FILE_NOT_FOUND':        return `${prefix}: file not found.`;
