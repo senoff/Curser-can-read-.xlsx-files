@@ -135,11 +135,10 @@ The MCP client is the easy path, but every tool is also a plain HTTP endpoint yo
 
 ```bash
 # Self-issue a key (no signup), then convert report.xlsx to Markdown.
-# Needs jq, and bash or zsh. The token reaches curl only through a --config file
-# read from stdin (a heredoc the shell expands in-process), and the base64 body
-# only through a process-substitution fd — so neither the secret nor the payload
-# is ever an argv element (safe from `ps`) or a temp file. -fsS --max-time makes
-# curl fail loudly on an HTTP error or a hang; the guard stops on a failed issue.
+# Needs jq, and bash or zsh. The base64 body is passed to curl through a
+# process-substitution fd and the token through a --config heredoc on stdin, which
+# keeps both out of the argument list. -fsS --max-time makes curl fail loudly on an
+# HTTP error or a hang; the guard line stops on a failed key issuance.
 KEY=$(curl -fsS --max-time 30 -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
   -H 'Content-Type: application/json' \
   -d '{"client_version":"2.0.0","platform":"cli"}' | jq -r .api_key)
