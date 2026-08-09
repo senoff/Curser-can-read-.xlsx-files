@@ -137,14 +137,15 @@ The MCP client is the easy path, but every tool is also a plain HTTP endpoint yo
 # Self-issue a key (no signup), then convert report.xlsx to Markdown. Needs jq.
 # The base64 is piped straight into the request body (jq -Rs builds the JSON from
 # stdin) and on into curl — it never sits on a command line, so this works on
-# macOS + Linux and on files of any size. -fsS makes curl fail loudly on an HTTP
-# error instead of handing back an empty key.
-KEY=$(curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
+# macOS + Linux and on files of any size. -fsS --max-time makes curl fail loudly
+# on an HTTP error or a hang; the guard line stops on a failed key issuance.
+KEY=$(curl -fsS --max-time 30 -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
   -H 'Content-Type: application/json' \
   -d '{"client_version":"2.0.0","platform":"cli"}' | jq -r .api_key)
+[ -n "$KEY" ] && [ "$KEY" != null ] || { echo "key issuance failed"; exit 1; }
 
 base64 < report.xlsx | tr -d '\n' | jq -Rs '{file_b64: ., to: "md"}' \
-  | curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
+  | curl -fsS --max-time 120 -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
       -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
       --data-binary @-
 ```
