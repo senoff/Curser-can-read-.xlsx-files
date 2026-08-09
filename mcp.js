@@ -2160,6 +2160,27 @@ async function upgradeCatalogInBackground(server, swap) {
 
 // Guard: don't auto-start when required by tests
 if (require.main === module) {
+  // L1 backstops (XLS-815): this is a long-running stdio server. A detached
+  // async throw NOT covered by withTimeout — an unhandled rejection or an
+  // uncaughtException from a stray callback — would otherwise crash the process
+  // with only Node's default stack, dropping every tool mid-session. Install
+  // last-resort handlers that write ONE diagnostic line to stderr (never stdout
+  // — stdout carries the JSON-RPC frames) and exit non-zero, so the client sees
+  // a clean disconnect instead of a corrupt frame or a hung pipe. Installed only
+  // in the entrypoint branch, so requiring mcp.js from tests never registers
+  // global handlers that would swallow the test runner's own rejections.
+  // (The compiled server has these at src/index.ts:165,186; this is the
+  // npm-package-only residue.)
+  process.on('uncaughtException', (err) => {
+    process.stderr.write(`xlsx-for-ai MCP uncaughtException: ${err && err.stack ? err.stack : err}\n`);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    process.stderr.write(`xlsx-for-ai MCP unhandledRejection: ${msg}\n`);
+    process.exit(1);
+  });
+
   // `xlsx-for-ai-mcp setup ...` wires Claude Code instead of starting the
   // stdio server — intercept before main() opens the transport.
   if (process.argv[2] === 'setup') {
