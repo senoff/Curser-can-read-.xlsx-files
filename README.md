@@ -134,19 +134,22 @@ For custom MCP clients, the binary is `xlsx-for-ai-mcp` (stdio transport). Overr
 The MCP client is the easy path, but every tool is also a plain HTTP endpoint you can call from any language — no SDK required. Registration is **anonymous and keyless**: `POST https://api.xlsx-for-ai.dev/api/v1/clients` (no auth) returns `{ client_id, api_key }`, then call any tool with `Authorization: Bearer <api_key>`. The free tier is **10,000 calls/month, 10 MB per file** — no billing, no email, no signup.
 
 ```bash
-# Self-issue a key (no signup), then convert report.xlsx to Markdown.
-# Needs jq. base64 is streamed through jq into the request body, so it works on
-# both macOS and Linux and never hits the command-line length limit — even for
-# large files. -fsS makes curl fail loudly on an HTTP error instead of silently.
+# Self-issue a key (no signup), then convert report.xlsx to Markdown. Needs jq.
+# The base64 is piped straight into the request body (jq -Rs builds the JSON from
+# stdin) and on into curl — it never sits on a command line, so this works on
+# macOS + Linux and on files of any size. -fsS makes curl fail loudly on an HTTP
+# error instead of handing back an empty key.
 KEY=$(curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
   -H 'Content-Type: application/json' \
   -d '{"client_version":"2.0.0","platform":"cli"}' | jq -r .api_key)
 
-jq -n --arg b64 "$(base64 < report.xlsx | tr -d '\n')" '{file_b64: $b64, to: "md"}' \
+base64 < report.xlsx | tr -d '\n' | jq -Rs '{file_b64: ., to: "md"}' \
   | curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
       -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
       --data-binary @-
 ```
+
+Beyond the free tier, rate-limited and oversize requests come back as a typed JSON error (`{ "error": { "code", "message" } }`) carrying an `upgrade` field with your options — see `GET /api/v1/reference` for the full contract.
 
 The same governed contract is served read-only from two routes — discover the whole API without a key:
 
