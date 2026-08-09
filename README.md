@@ -129,6 +129,26 @@ Verify: open Windsurf → Cascade → settings, confirm `xfa` is listed as an ac
 
 For custom MCP clients, the binary is `xlsx-for-ai-mcp` (stdio transport). Override the API base URL with the `XLSX_FOR_AI_API` env var for local dev against `http://localhost:3000`.
 
+### Using the raw HTTP API
+
+The MCP client is the easy path, but every tool is also a plain HTTP endpoint you can call from any language — no SDK required. Registration is **anonymous and keyless**: `POST https://api.xlsx-for-ai.dev/api/v1/clients` (no auth) returns `{ client_id, api_key }`, then call any tool with `Authorization: Bearer <api_key>`. The free tier is **10,000 calls/month, 10 MB per file** — no billing, no email, no signup.
+
+```bash
+# Self-issue a key, then convert a workbook to Markdown — no signup:
+KEY=$(curl -s -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
+  -H 'Content-Type: application/json' \
+  -d '{"client_version":"2.0.0","platform":"linux"}' | jq -r .api_key)
+
+curl -s -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d "{\"file_b64\":\"$(base64 -w0 report.xlsx)\",\"to\":\"md\"}"
+```
+
+The same governed contract is served read-only from two routes — discover the whole API without a key:
+
+- **[`GET /api/v1/reference`](https://api.xlsx-for-ai.dev/api/v1/reference)** — a self-contained human HTML reference for all 50 public-stable tools, including the on-ramp above.
+- **[`GET /api/v1/openapi.json`](https://api.xlsx-for-ai.dev/api/v1/openapi.json)** — the versioned OpenAPI 3.1 contract, verbatim. Point codegen, Postman, or Scalar/Redoc at it.
+
 ---
 
 ## What it does
