@@ -134,11 +134,13 @@ For custom MCP clients, the binary is `xlsx-for-ai-mcp` (stdio transport). Overr
 The MCP client is the easy path, but every tool is also a plain HTTP endpoint you can call from any language — no SDK required. Registration is **anonymous and keyless**: `POST https://api.xlsx-for-ai.dev/api/v1/clients` (no auth) returns `{ client_id, api_key }`, then call any tool with `Authorization: Bearer <api_key>`. The free tier is **10,000 calls/month, 10 MB per file** — no billing, no email, no signup.
 
 ```bash
-# Self-issue a key (no signup), then convert report.xlsx to Markdown. Needs jq.
-# The base64 is piped straight into the request body (jq -Rs builds the JSON from
-# stdin) and on into curl — it never sits on a command line, so this works on
-# macOS + Linux and on files of any size. -fsS --max-time makes curl fail loudly
-# on an HTTP error or a hang; the guard line stops on a failed key issuance.
+# Self-issue a key (no signup), then convert report.xlsx to Markdown.
+# Needs jq, and bash or zsh (uses process substitution). Two things never touch a
+# command line: the base64 body is piped through stdin into jq -Rs and on into
+# curl's --data-binary @- (so it survives ARG_MAX on any file), and the bearer
+# token is handed to curl via a --config file on a pipe — never argv, never disk —
+# so it can't leak through `ps`. -fsS --max-time makes curl fail loudly on an HTTP
+# error or a hang; the guard line stops on a failed key issuance.
 KEY=$(curl -fsS --max-time 30 -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
   -H 'Content-Type: application/json' \
   -d '{"client_version":"2.0.0","platform":"cli"}' | jq -r .api_key)
@@ -146,11 +148,12 @@ KEY=$(curl -fsS --max-time 30 -XPOST https://api.xlsx-for-ai.dev/api/v1/clients 
 
 base64 < report.xlsx | tr -d '\n' | jq -Rs '{file_b64: ., to: "md"}' \
   | curl -fsS --max-time 120 -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
-      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      --config <(printf 'header = "Authorization: Bearer %s"\n' "$KEY") \
+      -H 'Content-Type: application/json' \
       --data-binary @-
 ```
 
-The base64 payload streams through `stdin` (never an argv), so this works on arbitrarily large workbooks without hitting `ARG_MAX`. The key is self-issued and keyless — a throwaway free-tier credential you can regenerate any time by re-POSTing to `/api/v1/clients`.
+The free tier caps files at 10 MB; larger workbooks and higher volume come back as a typed JSON error with an `upgrade` field (see below).
 
 Beyond the free tier, rate-limited and oversize requests come back as a typed JSON error (`{ "error": { "code", "message" } }`) carrying an `upgrade` field with your options — see `GET /api/v1/reference` for the full contract.
 
