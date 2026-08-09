@@ -18,6 +18,7 @@
     "lib/client.js",
     "lib/config.js",
     "lib/inline-4xx.js",
+    "lib/read-file.js",
     "lib/discover.js",
     "lib/register.js",
     "lib/mcp-register.js",
