@@ -2171,13 +2171,23 @@ if (require.main === module) {
   // global handlers that would swallow the test runner's own rejections.
   // (The compiled server has these at src/index.ts:165,186; this is the
   // npm-package-only residue.)
+  // Log a CONCISE diagnostic only — error name + message + code, never the full
+  // stack or a serialized reason object. stderr on a stdio server is captured
+  // into the client's logs, so dumping frames (or a stringified upstream error
+  // that may carry a path/token/request fragment) would leak internal detail to
+  // a wider audience than intended. The name+message+code is enough to triage.
   process.on('uncaughtException', (err) => {
-    process.stderr.write(`xlsx-for-ai MCP uncaughtException: ${err && err.stack ? err.stack : err}\n`);
+    const detail = err instanceof Error
+      ? `${err.name}: ${err.message}${err.code ? ` (${err.code})` : ''}`
+      : 'non-error throw';
+    process.stderr.write(`xlsx-for-ai MCP uncaughtException: ${detail}\n`);
     process.exit(1);
   });
   process.on('unhandledRejection', (reason) => {
-    const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
-    process.stderr.write(`xlsx-for-ai MCP unhandledRejection: ${msg}\n`);
+    const detail = reason instanceof Error
+      ? `${reason.name}: ${reason.message}${reason.code ? ` (${reason.code})` : ''}`
+      : `non-error rejection (${typeof reason})`;
+    process.stderr.write(`xlsx-for-ai MCP unhandledRejection: ${detail}\n`);
     process.exit(1);
   });
 

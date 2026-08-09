@@ -72,6 +72,29 @@ test('readFileToBase64: a small allowed file round-trips with no false positive'
   assert.equal(Buffer.from(b64, 'base64').toString('utf8'), 'hello-xls815');
 });
 
+test('readFileToBase64: an allowed-extension symlink is refused (allowlist bypass closed)', () => {
+  // A symlink named with an allowed extension pointing at any target must be
+  // rejected via the explicit lstat check — on EVERY platform, not only where
+  // O_NOFOLLOW is defined. This is the HIGH finding's regression guard.
+  const evil = path.join(tmpDir, 'evil.xlsx');
+  try {
+    fs.symlinkSync(smallFile, evil);
+  } catch (err) {
+    // Symlink creation can be unavailable (e.g. unprivileged Windows). Skip
+    // rather than false-fail — the guard itself is still compiled in.
+    if (err && (err.code === 'EPERM' || err.code === 'ENOSYS')) return;
+    throw err;
+  }
+  let caught;
+  try {
+    readFileToBase64(evil);
+  } catch (e) {
+    caught = e;
+  }
+  assert.ok(caught, 'expected a symlink read to throw');
+  assert.equal(caught.code, 'SYMLINK_REJECTED', `wrong code: ${caught.code}`);
+});
+
 // --- 2. MCP entrypoint -----------------------------------------------------
 
 test('MCP entrypoint: dispatchTool surfaces FILE_TOO_LARGE for an over-cap file', async () => {

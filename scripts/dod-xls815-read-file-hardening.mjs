@@ -120,12 +120,24 @@ try {
   fails.push(`ARM5: the hardening test did not pass${failed ? ` (# fail ${failed[1]})` : ''}`);
 }
 if (out) {
-  const passN = Number((/# pass (\d+)/.exec(out) || [])[1] || 0);
-  const failN = Number((/# fail (\d+)/.exec(out) || [])[1] || 0);
-  const testsN = Number((/# tests (\d+)/.exec(out) || [])[1] || 0);
-  if (failN > 0) fails.push(`ARM5: the hardening test reported ${failN} failure(s)`);
-  if (testsN < 5) fails.push(`ARM5: expected >= 5 hardening tests, saw ${testsN} (emptied-file tautology guard)`);
-  if (passN < 5) fails.push(`ARM5: expected >= 5 passing hardening tests, saw ${passN}`);
+  // The PRIMARY green signal is the child exit code: execFileSync throws on any
+  // non-zero exit, so reaching here means node:test exited 0 (all tests passed).
+  // The count markers are a SECONDARY floor against an emptied-file tautology.
+  // Only enforce that floor when the markers are actually present — if a
+  // node:test reporter-format drift makes them unparseable, that is an env fault
+  // (INDETERMINATE), never a false RED on a zero count.
+  const hasMarkers = /# tests \d+/.test(out) && /# pass \d+/.test(out);
+  if (hasMarkers) {
+    const passN = Number((/# pass (\d+)/.exec(out) || [])[1] || 0);
+    const failN = Number((/# fail (\d+)/.exec(out) || [])[1] || 0);
+    const testsN = Number((/# tests (\d+)/.exec(out) || [])[1] || 0);
+    if (failN > 0) fails.push(`ARM5: the hardening test reported ${failN} failure(s)`);
+    if (testsN < 5) fails.push(`ARM5: expected >= 5 hardening tests, saw ${testsN} (emptied-file tautology guard)`);
+    if (passN < 5) fails.push(`ARM5: expected >= 5 passing hardening tests, saw ${passN}`);
+  } else {
+    console.error('XLS-815 CHECK: INDETERMINATE -- node:test exited 0 but emitted no parseable count markers (reporter drift); cannot floor the test count.');
+    process.exit(6);
+  }
 }
 
 // --- verdict ---------------------------------------------------------------
