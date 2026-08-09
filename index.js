@@ -22,6 +22,7 @@ const path = require('path');
 const { ensureRegistered } = require('./lib/register');
 const { callTool }         = require('./lib/client');
 const { surface4xx }       = require('./lib/inline-4xx');
+const { readFileToBase64 } = require('./lib/read-file');
 const {
   telemetryStatus,
   enableTelemetry,
@@ -76,7 +77,7 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 
 async function runClean(opts, absPath) {
-  const fileB64 = fs.readFileSync(absPath).toString('base64');
+  const fileB64 = readFileToBase64(absPath);
   const body = { file_b64: fileB64, mode: opts.execute ? 'execute' : 'diagnose' };
   if (opts.sheet) body.sheets = [opts.sheet];
   if (opts.detectors) body.detectors = opts.detectors.split(',').map((s) => s.trim()).filter(Boolean);
@@ -189,6 +190,8 @@ function friendlyCliError(prefix, err) {
       case 'DISALLOWED_EXTENSION':  return `${prefix}: file must be a workbook (allowed: .xlsx/.xls/.xlsm/.xlsb/.csv/.ods/.fods/.numbers/.tsv).`;
       case 'FILE_TOO_LARGE':        return `${prefix}: file exceeds the XFA_MAX_FILE_MB cap (default 50 MB).`;
       case 'FILE_NOT_FOUND':        return `${prefix}: file not found.`;
+      case 'SYMLINK_REJECTED':      return `${prefix}: refusing to read a symlink — pass the real file path.`;
+      case 'NOT_REGULAR_FILE':      return `${prefix}: not a regular file (directory, device, or socket).`;
       case 'MISSING_TOKEN':         return `${prefix}: required token env var is not set.`;
       case 'RATE_LIMITED':          return `${prefix}: monthly request cap reached — resets next month.`;
       default:                      return `${prefix}: request failed${code ? ` (code=${code})` : ''}.`;
@@ -330,7 +333,7 @@ async function runHealSubcommand(rest) {
   }
 
   await ensureRegistered();
-  const fileB64 = fs.readFileSync(filePath).toString('base64');
+  const fileB64 = readFileToBase64(filePath);
 
   // ---- diagnose path -----------------------------------------------------
   if (diagnoseOnly) {
@@ -456,7 +459,7 @@ async function runStampSubcommand(subcmd, rest) {
     process.exit(4);
   }
   await ensureRegistered();
-  const fileB64 = fs.readFileSync(filePath).toString('base64');
+  const fileB64 = readFileToBase64(filePath);
 
   if (subcmd === 'stamp') {
     let checksPath = null, outPath = null, supervisor = null;
@@ -661,7 +664,7 @@ async function main() {
     return;
   }
 
-  const fileB64 = fs.readFileSync(absPath).toString('base64');
+  const fileB64 = readFileToBase64(absPath);
   // Server format enum is 'md' | 'json' | 'sql'. The legacy CLI default 'text'
   // maps to the server's default (md). Don't send 'text' — server rejects it.
   const apiFormat = opts.format === 'text' ? undefined : opts.format;
