@@ -134,14 +134,18 @@ For custom MCP clients, the binary is `xlsx-for-ai-mcp` (stdio transport). Overr
 The MCP client is the easy path, but every tool is also a plain HTTP endpoint you can call from any language — no SDK required. Registration is **anonymous and keyless**: `POST https://api.xlsx-for-ai.dev/api/v1/clients` (no auth) returns `{ client_id, api_key }`, then call any tool with `Authorization: Bearer <api_key>`. The free tier is **10,000 calls/month, 10 MB per file** — no billing, no email, no signup.
 
 ```bash
-# Self-issue a key, then convert a workbook to Markdown — no signup:
-KEY=$(curl -s -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
+# Self-issue a key (no signup), then convert report.xlsx to Markdown.
+# Needs jq. base64 is streamed through jq into the request body, so it works on
+# both macOS and Linux and never hits the command-line length limit — even for
+# large files. -fsS makes curl fail loudly on an HTTP error instead of silently.
+KEY=$(curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/clients \
   -H 'Content-Type: application/json' \
-  -d '{"client_version":"2.0.0","platform":"linux"}' | jq -r .api_key)
+  -d '{"client_version":"2.0.0","platform":"cli"}' | jq -r .api_key)
 
-curl -s -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d "{\"file_b64\":\"$(base64 -w0 report.xlsx)\",\"to\":\"md\"}"
+jq -n --arg b64 "$(base64 < report.xlsx | tr -d '\n')" '{file_b64: $b64, to: "md"}' \
+  | curl -fsS -XPOST https://api.xlsx-for-ai.dev/api/v1/tools/xlsx_convert \
+      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      --data-binary @-
 ```
 
 The same governed contract is served read-only from two routes — discover the whole API without a key:
