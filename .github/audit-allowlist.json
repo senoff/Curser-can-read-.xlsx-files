@@ -1,5 +1,5 @@
 {
-  "$comment": "Triaged advisories that audit.yml will not fail the build on. Each entry MUST include a reassess date. A PR that adds an entry here is a security-policy change \u2014 review accordingly.",
+  "$comment": "Triaged advisories that audit.yml will not fail the build on. Each entry MUST include a reassess date. A PR that adds an entry here is a security-policy change \u2014 review accordingly. Sign-off for this PR's entries: xlsx-board owner / SPM, 2026-08-09 \u2014 stdio-only client, the HTTP-server-transport paths that would reach ip-address/fast-uri on untrusted input never execute; unreachability triage independently re-verified. See PR description for the recorded security-policy grace-override.",
   "advisories": [
     {
       "ghsa": "GHSA-7p8r-x3mc-p8w7",
