@@ -150,6 +150,8 @@ base64 < report.xlsx | tr -d '\n' | jq -Rs '{file_b64: ., to: "md"}' \
       --data-binary @-
 ```
 
+The base64 payload streams through `stdin` (never an argv), so this works on arbitrarily large workbooks without hitting `ARG_MAX`. The key is self-issued and keyless — a throwaway free-tier credential you can regenerate any time by re-POSTing to `/api/v1/clients`.
+
 Beyond the free tier, rate-limited and oversize requests come back as a typed JSON error (`{ "error": { "code", "message" } }`) carrying an `upgrade` field with your options — see `GET /api/v1/reference` for the full contract.
 
 The same governed contract is served read-only from two routes — discover the whole API without a key:
