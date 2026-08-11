@@ -163,6 +163,25 @@ jobs:
       - name: Test
         run: npm test --if-present
 
+      # XLS-849 — refuse to publish a baked tool floor that has drifted from live
+      # inventory (the 50-vs-full staleness class). Real drift (exit 1) blocks the
+      # release; an unreachable inventory (exit 2) is infra, not drift — warn and
+      # proceed rather than couple every publish to prod reachability.
+      - name: Verify baked tool floor is fresh vs live inventory
+        run: |
+          set +e
+          npm run tool-floor:check
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "tool floor is fresh."
+          elif [ "$code" -eq 2 ]; then
+            echo "::warning::could not reach live inventory to verify the tool floor — proceeding (infra, not drift)."
+          else
+            echo "::error::baked tool floor has drifted from live inventory — regenerate with 'npm run tool-floor:generate' and commit before publishing."
+            exit 1
+          fi
+
       - name: Read package metadata
         id: pkg
         run: |

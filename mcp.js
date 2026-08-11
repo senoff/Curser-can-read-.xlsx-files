@@ -1240,6 +1240,34 @@ const TOOLS = [
   },
 ];
 
+// XLS-849 — append the GENERATED floor entries (the tier-2-funnel import/feed
+// producers + xlsx_pii_scan + xlsx_vault_scan) so a cold-start client (no
+// network, no cache) still exposes the full server inventory, and so
+// mergeTools has a baked description to fill in for tools the /api/v1/tools/list
+// wire shape carries without one. Generated from live inventory by
+// scripts/gen-tool-floor.js; drift-guarded by `--check`. Guarded require: if the
+// generated file is absent (e.g. a from-source checkout before first generate)
+// the client still boots on the hand-authored floor.
+try {
+  const { GENERATED_FLOOR_TOOLS } = require('./generated/tool-floor.generated.js');
+  if (Array.isArray(GENERATED_FLOOR_TOOLS)) {
+    const known = new Set(TOOLS.map((t) => t.name));
+    for (const t of GENERATED_FLOOR_TOOLS) {
+      if (t && typeof t.name === 'string' && !known.has(t.name)) {
+        TOOLS.push(t);
+        known.add(t.name);
+      }
+    }
+  }
+} catch (e) {
+  // Swallow ONLY "the generated floor isn't there" (from-source checkout before
+  // first generate). A syntax error or partial write in the generated module is
+  // a REAL corruption that would silently drop 15 tools — rethrow it loudly.
+  if (!(e && e.code === 'MODULE_NOT_FOUND' && /generated[\\/]tool-floor\.generated\.js/.test(e.message))) {
+    throw e;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // File → base64 helper
 //
