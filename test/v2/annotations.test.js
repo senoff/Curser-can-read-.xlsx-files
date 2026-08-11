@@ -24,6 +24,18 @@ const EXPECTED_TOOL_NAMES = new Set([
   'xlsx_receipt', 'xlsx_healer_cure', 'xlsx_healer_intent',
   'xlsx_session_set_validations',
   'xlsx_post_slack', 'xlsx_post_teams',
+  // XLS-849 — the tier-2-funnel producers + the two public-stable scans that
+  // the server surfaces but the hand-frozen floor was missing. Baked via the
+  // generated floor (generated/tool-floor.generated.js); the live-inventory
+  // tie is `npm run tool-floor:check`.
+  'xlsx_pii_scan', 'xlsx_vault_scan',
+  'printful_catalog_pull', 'printful_catalog_import',
+  'printify_catalog_pull', 'printify_catalog_import',
+  'shopify_products_import', 'shopify_products_import_fix',
+  'shopify_collections_import', 'shopify_inventory_import',
+  'shopify_url_redirects_import',
+  'shopify_google_feed', 'shopify_amazon_feed', 'shopify_ebay_feed',
+  'shopify_ups_feed',
 ]);
 
 test('TOOL_ANNOTATIONS matches the canonical surfaced-tool list exactly', () => {
