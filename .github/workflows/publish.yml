@@ -315,19 +315,35 @@ jobs:
           set -euo pipefail
           V="$(node -p "require('./package.json').version")"
           MCP_NAME="io.github.senoff/xlsx-for-ai"
+          # Record the registry-sync outcome to the immutable run summary — a durable audit entry
+          # for this security-relevant operation (OIDC publish to the MCP Registry), so a synced /
+          # no-op / stranded result is recoverable from the run record, not only the scrolling log.
+          audit() { echo "- **MCP Registry sync:** $1" >> "$GITHUB_STEP_SUMMARY"; }
+          # Resolve the registry's isLatest npm version with node (guaranteed present — setup-node
+          # ran; no jq dependency). Keys on the isLatest FIELD, never list position; exactly-one
+          # isLatest and exactly-one matching npm package, else empty (an ambiguous answer is not a
+          # version). Empty on any error too — a failed probe must not masquerade as "already synced".
           reg_latest() {
             curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --max-time 60 \
               "https://registry.modelcontextprotocol.io/v0/servers?search=${MCP_NAME}&version=latest" 2>/dev/null \
-              | jq -r --arg n "$MCP_NAME" '
-                  [ .servers[]
-                    | select(.server.name==$n)
-                    | select(._meta["io.modelcontextprotocol.registry/official"].isLatest==true)
-                    | .server.packages[] | select(.registryType=="npm" and .identifier=="xlsx-for-ai") | .version
-                  ] | (if length==1 then .[0] else "" end)' 2>/dev/null || true
+              | node -e '
+                  let s = "";
+                  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+                    try {
+                      const n = "io.github.senoff/xlsx-for-ai";
+                      const servers = (JSON.parse(s).servers) || [];
+                      const mine = servers.filter((x) => x && x.server && x.server.name === n);
+                      const latest = mine.filter((x) => ((x._meta || {})["io.modelcontextprotocol.registry/official"] || {}).isLatest === true);
+                      if (latest.length !== 1) return process.stdout.write("");
+                      const pk = (latest[0].server.packages || []).filter((p) => p.registryType === "npm" && p.identifier === "xlsx-for-ai");
+                      process.stdout.write(pk.length === 1 ? String(pk[0].version) : "");
+                    } catch { process.stdout.write(""); }
+                  });' 2>/dev/null || true
           }
           CUR="$(reg_latest)"
           if [ "$CUR" = "$V" ]; then
             echo "MCP Registry already serves isLatest=${V} — nothing to sync (idempotent no-op)."
+            audit "already at \`${V}\` (no-op)"
             exit 0
           fi
           echo "MCP Registry isLatest is '${CUR:-<unmeasured>}', package is ${V} — syncing."
@@ -350,8 +366,10 @@ jobs:
             echo "::error::mcp-publisher failed after 3 attempts — the MCP Registry is now STRANDED"
             echo "behind npm (npm=${V}, registry=${CUR:-unknown}). Failing the release LOUD (XLS-504):"
             echo "fix and re-run; do not leave the registry drifted behind npm."
+            audit "**FAILED** — stranded behind npm (npm=\`${V}\`, registry=\`${CUR:-unknown}\`)"
             exit 1
           fi
+          audit "synced \`${CUR:-<unmeasured>}\` → \`${V}\`"
 
       - name: Summary
         if: always()
