@@ -142,6 +142,25 @@ jobs:
           fi
           echo "Tag v${TAG_VERSION} matches package.json ${PKG_VERSION}."
 
+      # server.json ↔ package.json agreement (XLS-504). A static tree check, so it runs HERE with
+      # the other pre-publish validations — BEFORE Install/Pack/publish, before anything
+      # irreversible. The MCP Registry sync (far below) reads server.json; if it disagrees with
+      # package.json the bump PR was half-done, and catching it after `npm publish` would leave
+      # npm shipped while the registry refuses = the exact drift this card removes. So fail here,
+      # closed, first. Runs on every trigger incl. dry_run — a mismatched tree is not releasable.
+      - name: Verify server.json version matches package.json
+        run: |
+          PKG_V="$(node -p "require('./package.json').version")"
+          SRV_V="$(node -p "require('./server.json').version")"
+          SRV_PKG_V="$(node -p "require('./server.json').packages[0].version")"
+          if [ "$SRV_V" != "$PKG_V" ] || [ "$SRV_PKG_V" != "$PKG_V" ]; then
+            echo "::error::server.json (version=$SRV_V, packages[0]=$SRV_PKG_V) != package.json ($PKG_V)."
+            echo "Bump server.json in the same PR as package.json. The in-runner sync that used to"
+            echo "hide this was removed (XLS-504) because its result never landed on main."
+            exit 1
+          fi
+          echo "server.json matches package.json at $PKG_V."
+
       # ENFORCEMENT HALF of the grace gate (XLS-615). XLS-412 made a kept CRITICAL
       # VISIBLE on the PR (the gate is ADVISORY — not a required check, so a CRITICAL
       # can land, and a human PR-body override can wave one through at merge). It does
@@ -241,50 +260,116 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.XLSX_NPM }}
 
-      # Keep the Official MCP Registry listing (io.github.senoff/xlsx-for-ai) in
-      # sync on every release. Auth is GitHub Actions OIDC — the id-token:write
-      # permission above lets mcp-publisher mint a token for the io.github.senoff/*
-      # namespace with no stored secret and no interactive login. server.json's
-      # version is force-synced to package.json just before publish so the
-      # registry never drifts behind npm. continue-on-error: a registry hiccup
-      # (or a same-version re-publish rejection) must never fail the npm release.
-      - name: Sync server.json version to package.json
+      # ── MCP Registry sync — the AUTHORITATIVE per-release path (XLS-504) ─────────────────
+      # publish.yml owns keeping the Official MCP Registry (io.github.senoff/xlsx-for-ai) in
+      # sync on every release. publish-mcp.yml's automatic v* tag trigger is RETIRED (XLS-504):
+      # releases are tagless workflow_dispatches, so that trigger never fired for 3.2.6–3.2.9
+      # and the registry silently stranded behind npm. One release path, one sync, gated LOUD —
+      # no tag-discipline dependency, no continue-on-error swallowing the failure.
+      #
+      # server.json is NO LONGER mutated in-runner. Its version is committed to main in the SAME
+      # reviewed bump PR as package.json (XLS-504 removes the ephemeral in-runner write whose
+      # result never landed — that is exactly why main's server.json sat at 3.2.1 for 8 releases
+      # while npm moved to 3.2.9). The two are verified to AGREE up front, in the pre-publish
+      # validation block above ("Verify server.json version matches package.json") — before
+      # anything irreversible — so a half-done bump PR fails the release without publishing.
+
+      # KILL the npm-propagation 404. The MCP Registry validates that the npm version named in
+      # server.json actually EXISTS on npm; submit too soon after `npm publish` and the registry
+      # 404s the version and the sync fails. Poll npm (bounded) until this exact version is
+      # visible, so the registry submit only runs against a version npm will confirm.
+      - name: Wait for npm to propagate this version
         if: steps.flags.outputs.dry_run == 'false'
         run: |
-          node -e "const fs=require('fs');const pkg=require('./package.json');const s=JSON.parse(fs.readFileSync('server.json','utf8'));s.version=pkg.version;s.packages[0].version=pkg.version;fs.writeFileSync('server.json',JSON.stringify(s,null,2)+'\n');"
-          echo "server.json synced to $(node -p "require('./package.json').version")"
+          set -eu
+          V="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          for attempt in $(seq 1 10); do
+            # Per-call timeout: a stalled npm CLI/registry must not hang the runner (the loop's
+            # own bound is meaningless if one iteration blocks forever).
+            if timeout 30s npm view "${NAME}@${V}" version >/dev/null 2>&1; then
+              echo "npm is serving ${NAME}@${V} (attempt ${attempt})."
+              exit 0
+            fi
+            echo "npm not yet serving ${NAME}@${V} (attempt ${attempt}/10); waiting..."
+            if [ "$attempt" -lt 6 ]; then sleep $((attempt * 3)); else sleep 18; fi
+          done
+          echo "::error::npm never surfaced ${NAME}@${V} within the propagation window — the MCP"
+          echo "Registry would 404 this version. Not submitting against a version npm cannot confirm."
+          exit 1
 
+      # Submit server.json to the MCP Registry — GATED LOUD (no continue-on-error, XLS-504). A
+      # failed sync now FAILS THE RELEASE JOB, making the drift visible and actionable instead of
+      # the old silent skip that let the registry rot behind npm for ~8 releases. Idempotent: if
+      # the registry already serves this exact version (a re-dispatch of a done release, keyed on
+      # isLatest — never list position), it is a no-op success, not a duplicate-publish failure.
       - name: Publish to MCP Registry (OIDC)
         if: steps.flags.outputs.dry_run == 'false'
-        continue-on-error: true
         env:
-          # Pinned to a released tag + SRI hash so a republished or
-          # tampered binary fails closed — same integrity-pinning contract
-          # the lockfile/signed-install gates apply to the dep tree, now
-          # extended to the publish-path binary fetch. Bump both together.
+          # Pinned to a released tag + SRI hash so a republished or tampered binary fails closed
+          # — the same integrity-pinning contract the lockfile/signed-install gates apply to the
+          # dep tree, extended to the publish-path binary fetch. Bump both together.
           MCP_PUBLISHER_TAG: v1.7.9
           MCP_PUBLISHER_SHA256: ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac
         run: |
           set -euo pipefail
+          V="$(node -p "require('./package.json').version")"
+          MCP_NAME="io.github.senoff/xlsx-for-ai"
+          # Record the registry-sync outcome to the immutable run summary — a durable audit entry
+          # for this security-relevant operation (OIDC publish to the MCP Registry), so a synced /
+          # no-op / stranded result is recoverable from the run record, not only the scrolling log.
+          audit() { echo "- **MCP Registry sync:** $1" >> "$GITHUB_STEP_SUMMARY"; }
+          # Resolve the registry's isLatest npm version with node (guaranteed present — setup-node
+          # ran; no jq dependency). Keys on the isLatest FIELD, never list position; exactly-one
+          # isLatest and exactly-one matching npm package, else empty (an ambiguous answer is not a
+          # version). Empty on any error too — a failed probe must not masquerade as "already synced".
+          reg_latest() {
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --max-time 60 \
+              "https://registry.modelcontextprotocol.io/v0/servers?search=${MCP_NAME}&version=latest" 2>/dev/null \
+              | node -e '
+                  let s = "";
+                  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+                    try {
+                      const n = "io.github.senoff/xlsx-for-ai";
+                      const servers = (JSON.parse(s).servers) || [];
+                      const mine = servers.filter((x) => x && x.server && x.server.name === n);
+                      const latest = mine.filter((x) => ((x._meta || {})["io.modelcontextprotocol.registry/official"] || {}).isLatest === true);
+                      if (latest.length !== 1) return process.stdout.write("");
+                      const pk = (latest[0].server.packages || []).filter((p) => p.registryType === "npm" && p.identifier === "xlsx-for-ai");
+                      process.stdout.write(pk.length === 1 ? String(pk[0].version) : "");
+                    } catch { process.stdout.write(""); }
+                  });' 2>/dev/null || true
+          }
+          CUR="$(reg_latest)"
+          if [ "$CUR" = "$V" ]; then
+            echo "MCP Registry already serves isLatest=${V} — nothing to sync (idempotent no-op)."
+            audit "already at \`${V}\` (no-op)"
+            exit 0
+          fi
+          echo "MCP Registry isLatest is '${CUR:-<unmeasured>}', package is ${V} — syncing."
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --max-time 60 -o mcp-publisher.tar.gz \
             "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_TAG}/mcp-publisher_linux_amd64.tar.gz"
           echo "Verifying mcp-publisher ${MCP_PUBLISHER_TAG} against pinned SHA-256..."
           echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
           tar xzf mcp-publisher.tar.gz mcp-publisher
-          publish_ok=false
+          published=false
           for attempt in 1 2 3; do
             if timeout 60s ./mcp-publisher login github-oidc && timeout 60s ./mcp-publisher publish; then
-              publish_ok=true
-              echo "mcp-publisher publish succeeded (attempt $attempt)"
+              published=true
+              echo "mcp-publisher publish succeeded (attempt $attempt)."
               break
             fi
             echo "mcp-publisher attempt $attempt failed." >&2
             [ "$attempt" -lt 3 ] && sleep $((attempt * 2))
           done
-          if [ "$publish_ok" != true ]; then
-            echo "::warning::mcp-publisher failed after 3 attempts (registry sync skipped; npm publish unaffected)"
+          if [ "$published" != true ]; then
+            echo "::error::mcp-publisher failed after 3 attempts — the MCP Registry is now STRANDED"
+            echo "behind npm (npm=${V}, registry=${CUR:-unknown}). Failing the release LOUD (XLS-504):"
+            echo "fix and re-run; do not leave the registry drifted behind npm."
+            audit "**FAILED** — stranded behind npm (npm=\`${V}\`, registry=\`${CUR:-unknown}\`)"
             exit 1
           fi
+          audit "synced \`${CUR:-<unmeasured>}\` → \`${V}\`"
 
       - name: Summary
         if: always()
