@@ -63,17 +63,27 @@ on:
     tags:
       - "v*"
 
+# Least privilege (XLS-959): the workflow default is READ-ONLY. `id-token: write` — the
+# OIDC token-minting that authenticates the npm publish — is granted ONLY on the publish
+# job below, NOT at workflow scope, so the post-publish smoke matrix never inherits
+# token-minting it has no need for (a compromised smoke step cannot mint a registry token).
 permissions:
   contents: read    # this workflow no longer commits or pushes anything. It reads main
                     # and publishes what main carries; the bump arrives as a reviewed PR.
-  id-token: write   # XLS-959: OIDC identity for TRUSTED PUBLISHING to npm (no token) AND
-                    # automatic provenance. This one permission is the entire npm auth path.
   actions: read         # XLS-615: read the grace receipt artifact (gh api actions/artifacts)
   pull-requests: read   # XLS-615: map the release commit on main to its PR head sha
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # id-token: write lives HERE — the ONLY job that mints an OIDC token (npm trusted
+    # publishing + automatic provenance). Job-level permissions replace the workflow
+    # default entirely, so the read grants the grace gate needs are restated.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      id-token: write
     outputs:
       published: ${{ steps.publish.outputs.published }}
       name: ${{ steps.pkg.outputs.name }}
@@ -455,6 +465,12 @@ jobs:
     name: Post-publish smoke (registry install)
     needs: publish
     if: needs.publish.outputs.published == 'true'
+    # Read-only — installs from the public registry, mints nothing. NO id-token (least
+    # privilege): the smoke has no reason to hold the OIDC token the publish job uses.
+    permissions:
+      contents: read
+    # Hard ceiling so a wedged MCP handshake cannot burn a runner to the default 6h timeout.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -499,7 +515,9 @@ jobs:
             exit 1
           fi
           mkdir -p "$HOME/.xlsx-for-ai"
-          printf '{"api_key":"%s"}' "$XFA_SMOKE_KEY" > "$HOME/.xlsx-for-ai/config.json"
+          # Serialize via json.dumps so a key with quotes/backslashes/newlines can't corrupt
+          # the config into a false-negative smoke failure (XLS-959, grace). setup-python ran.
+          python -c "import json,os; p=os.path.join(os.path.expanduser('~'),'.xlsx-for-ai','config.json'); open(p,'w').write(json.dumps({'api_key': os.environ['XFA_SMOKE_KEY']}))"
 
       - name: Make fixture
         shell: bash
@@ -533,8 +551,19 @@ jobs:
           send({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
           send({'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'xlsx_read','arguments':{'file_path': os.path.abspath('t.xlsx')}}})
           time.sleep(25)
-          p.stdin.close()
-          out = p.stdout.read().decode(errors='replace')
+          try:
+              p.stdin.close()
+          except Exception:
+              pass
+          # Proactively stop the server, then drain BOTH pipes with a bounded wait — never a
+          # blocking p.stdout.read() that hangs if the server keeps stdout open (XLS-959, grace).
+          p.terminate()
+          try:
+              out, _err = p.communicate(timeout=10)
+          except subprocess.TimeoutExpired:
+              p.kill()
+              out, _err = p.communicate(timeout=5)
+          out = out.decode(errors='replace')
           ok = {1: False, 2: False, 3: False}
           for line in out.split('\n'):
               line = line.strip()
@@ -546,7 +575,6 @@ jobs:
               if m.get('id') in ok and 'result' in m: ok[m['id']] = True
               if m.get('id') in ok and 'error' in m:
                   print('RPC ERROR id', m['id'], ':', str(m['error'])[:300]); sys.exit(1)
-          p.terminate()
           missing = [k for k, v in ok.items() if not v]
           if missing:
               print('MISSING RESPONSES for ids:', missing); print('STDOUT was:', out[:1500]); sys.exit(1)
