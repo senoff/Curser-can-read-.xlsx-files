@@ -32,6 +32,13 @@ jobs:
           mkdir smoke && cd smoke
           npm init -y >/dev/null
           npm install xlsx-for-ai@${{ github.event.inputs.version || '3.2.9' }}
+      - name: inject smoke credentials (internal-flagged client; CI auto-registration is deliberately disabled in the client)
+        shell: bash
+        env:
+          XFA_SMOKE_KEY: ${{ secrets.XFA_SMOKE_KEY }}
+        run: |
+          mkdir -p "$HOME/.xlsx-for-ai"
+          printf '{"api_key":"%s"}' "$XFA_SMOKE_KEY" > "$HOME/.xlsx-for-ai/config.json"
       - name: make fixture
         shell: bash
         run: |
