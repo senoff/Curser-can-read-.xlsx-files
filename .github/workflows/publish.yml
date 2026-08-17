@@ -76,6 +76,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Hard ceiling: this job performs the irreversible npm publish + registry sync; a hung
+    # network step must not pin a runner to the default 6h timeout (XLS-959/grace).
+    timeout-minutes: 30
     # id-token: write lives HERE — the ONLY job that mints an OIDC token (npm trusted
     # publishing + automatic provenance). Job-level permissions replace the workflow
     # default entirely, so the read grants the grace gate needs are restated.
@@ -329,6 +332,10 @@ jobs:
         run: |
           npm publish --access public
           echo "published=true" >> "$GITHUB_OUTPUT"
+          # Durable audit record of this irreversible, security-relevant operation to the immutable
+          # run summary — recoverable from the run record for compliance / incident response, alongside
+          # the MCP-sync audit line below (XLS-959/grace). Provenance itself is attested on npm.
+          echo "- **npm publish (OIDC trusted publishing):** \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\` published with automatic provenance at $(date -u +%Y-%m-%dT%H:%M:%SZ) (run \`${GITHUB_RUN_ID}\`)." >> "$GITHUB_STEP_SUMMARY"
 
       # ── MCP Registry sync — the AUTHORITATIVE per-release path (XLS-504) ─────────────────
       # publish.yml owns keeping the Official MCP Registry (io.github.senoff/xlsx-for-ai) in
@@ -522,7 +529,7 @@ jobs:
       - name: Make fixture
         shell: bash
         run: |
-          pip install openpyxl
+          python -m pip install openpyxl
           python -c "
           from openpyxl import Workbook
           wb = Workbook(); ws = wb.active; ws.title = 'Data'
@@ -533,7 +540,9 @@ jobs:
         shell: bash
         run: |
           cd smoke
-          ./node_modules/.bin/xlsx-for-ai t.xlsx
+          # npx resolves the LOCAL install cross-platform (no POSIX-path .bin shim assumption
+          # that breaks under bash on windows-latest, XLS-959/grace). --no-install: never re-fetch.
+          npx --no-install xlsx-for-ai t.xlsx
 
       - name: MCP stdio mode
         shell: bash
@@ -542,8 +551,12 @@ jobs:
           python - <<'PYEOF'
           import json, subprocess, os, time, sys
           exe = os.path.join('node_modules', '.bin', 'xlsx-for-ai-mcp')
-          if os.name == 'nt': exe += '.cmd'
-          p = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=(os.name=='nt'))
+          # Windows: the bin shim is a .cmd — spawn it as a STRING with shell=True (a list with
+          # shell=True is malformed on Windows). POSIX: spawn the list with shell=False (XLS-959/grace).
+          if os.name == 'nt':
+              p = subprocess.Popen(exe + '.cmd', stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+          else:
+              p = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
           def send(o):
               p.stdin.write((json.dumps(o) + '\n').encode()); p.stdin.flush()
           send({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'ci-smoke','version':'1.0'}}})
