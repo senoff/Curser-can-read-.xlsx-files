@@ -496,20 +496,25 @@ jobs:
       - name: Clean install just-published version from the registry
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           PKG="${{ needs.publish.outputs.name }}@${{ needs.publish.outputs.version }}"
-          mkdir smoke && cd smoke
-          npm init -y >/dev/null
-          for attempt in $(seq 1 10); do
-            if npm install "$PKG"; then
-              echo "Installed $PKG (attempt $attempt)."
-              exit 0
+          # Poll npm until this exact version is visible on THIS runner's edge (propagation is
+          # per-region), THEN install once — clearer than a blind retry-install loop, and uses a
+          # bash `until` counter (no `seq`, portable across the macOS/Windows runners). XLS-959/grace.
+          attempt=1
+          until npm view "$PKG" version >/dev/null 2>&1; do
+            if [ "$attempt" -ge 10 ]; then
+              echo "::error::registry never served $PKG within the propagation window."
+              exit 1
             fi
             echo "registry not yet serving $PKG (attempt $attempt/10); waiting..."
+            attempt=$((attempt + 1))
             sleep 12
           done
-          echo "::error::registry never served $PKG within the propagation window."
-          exit 1
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install "$PKG"
+          echo "Installed $PKG."
 
       - name: Inject smoke credentials (read-scoped; the ONLY secret this workflow references)
         shell: bash
@@ -572,11 +577,12 @@ jobs:
           # blocking p.stdout.read() that hangs if the server keeps stdout open (XLS-959, grace).
           p.terminate()
           try:
-              out, _err = p.communicate(timeout=10)
+              out, err = p.communicate(timeout=10)
           except subprocess.TimeoutExpired:
               p.kill()
-              out, _err = p.communicate(timeout=5)
+              out, err = p.communicate(timeout=5)
           out = out.decode(errors='replace')
+          err = (err or b'').decode(errors='replace')
           ok = {1: False, 2: False, 3: False}
           for line in out.split('\n'):
               line = line.strip()
@@ -590,6 +596,9 @@ jobs:
                   print('RPC ERROR id', m['id'], ':', str(m['error'])[:300]); sys.exit(1)
           missing = [k for k, v in ok.items() if not v]
           if missing:
-              print('MISSING RESPONSES for ids:', missing); print('STDOUT was:', out[:1500]); sys.exit(1)
+              print('MISSING RESPONSES for ids:', missing)
+              print('STDOUT was:', out[:1500])
+              print('STDERR was:', err[:1500])
+              sys.exit(1)
           print('MCP stdio OK: initialize + tools/list + xlsx_read all answered')
           PYEOF
