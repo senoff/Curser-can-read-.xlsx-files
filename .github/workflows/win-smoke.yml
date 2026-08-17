@@ -1,0 +1,83 @@
+# One-shot field-glitch check (XLS-958 churn investigation, 2026-08-17):
+# does the PUBLISHED npm artifact work on Windows? Installs a given version
+# from the registry (not from this repo) and smokes CLI mode + MCP stdio mode.
+name: win-smoke
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'npm version to smoke-test'
+        required: true
+        default: '3.2.9'
+  pull_request:
+    paths:
+      - '.github/workflows/win-smoke.yml'
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: clean install from registry
+        shell: bash
+        run: |
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install xlsx-for-ai@${{ github.event.inputs.version || '3.2.9' }}
+      - name: make fixture
+        shell: bash
+        run: |
+          pip install openpyxl
+          python -c "
+          from openpyxl import Workbook
+          wb = Workbook(); ws = wb.active; ws.title = 'Data'
+          for r in [[10],[0],[30],[0],[50]]: ws.append(r)
+          wb.save('smoke/t.xlsx')"
+      - name: CLI mode
+        shell: bash
+        run: |
+          cd smoke
+          ./node_modules/.bin/xlsx-for-ai t.xlsx
+      - name: MCP stdio mode
+        shell: bash
+        run: |
+          cd smoke
+          python - <<'PYEOF'
+          import json, subprocess, os, time, sys
+          exe = os.path.join('node_modules', '.bin', 'xlsx-for-ai-mcp')
+          if os.name == 'nt': exe += '.cmd'
+          p = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=(os.name=='nt'))
+          def send(o):
+              p.stdin.write((json.dumps(o) + '\n').encode()); p.stdin.flush()
+          send({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'ci-smoke','version':'1.0'}}})
+          send({'jsonrpc':'2.0','method':'notifications/initialized'})
+          send({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
+          send({'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'xlsx_read','arguments':{'file_path': os.path.abspath('t.xlsx')}}})
+          time.sleep(25)
+          p.stdin.close()
+          out = p.stdout.read().decode(errors='replace')
+          ok = {1: False, 2: False, 3: False}
+          for line in out.split('\n'):
+              line = line.strip()
+              if not line: continue
+              try:
+                  m = json.loads(line)
+              except Exception:
+                  print('PROTOCOL CORRUPTION on stdout:', line[:200]); sys.exit(1)
+              if m.get('id') in ok and 'result' in m: ok[m['id']] = True
+              if m.get('id') in ok and 'error' in m:
+                  print('RPC ERROR id', m['id'], ':', str(m['error'])[:300]); sys.exit(1)
+          p.terminate()
+          missing = [k for k, v in ok.items() if not v]
+          if missing:
+              print('MISSING RESPONSES for ids:', missing); print('STDOUT was:', out[:1500]); sys.exit(1)
+          print('MCP stdio OK: initialize + tools/list + xlsx_read all answered')
+          PYEOF
