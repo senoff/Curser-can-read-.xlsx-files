@@ -29,6 +29,12 @@ const EXPECTED_TOOL_NAMES = new Set([
   // generated floor (generated/tool-floor.generated.js); the live-inventory
   // tie is `npm run tool-floor:check`.
   'xlsx_pii_scan', 'xlsx_vault_scan',
+  // XLS-26 Save-As producers + XLS-960 free check tools — surfaced live and
+  // baked into the generated floor (#60, before the v4.0.0 publish); annotated
+  // via saveAsTool (pii_clean/vault_cure, destructiveHint:false — source bytes
+  // never mutated) and readTool (csv_check/xlsx_check, readOnlyHint:true).
+  'xlsx_pii_clean', 'xlsx_vault_cure',
+  'csv_check', 'xlsx_check',
   'printful_catalog_pull', 'printful_catalog_import',
   'printify_catalog_pull', 'printify_catalog_import',
   'shopify_products_import', 'shopify_products_import_fix',
