@@ -102,19 +102,24 @@ refutes:
       const {GENERATED_FLOOR_TOOLS}=require("./generated/tool-floor.generated.js");
       const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_pii_clean");
       if(!t){console.error("xlsx_pii_clean absent");process.exit(2);}
-      const props=Object.keys(t.inputSchema.properties);
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const ok=props.includes("file_b64") && !props.some(k=>REF.test(k));
-      console.log("xlsx_pii_clean top-level inputs:",props.sort().join(","));
+      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const all=names(t.inputSchema,[]);
+      const top=Object.keys(t.inputSchema.properties||{});
+      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      console.log("xlsx_pii_clean inputs (all depths):",all.sort().join(","));
       process.exit(ok?0:1);
       ' 
     must_fail: |-
       node -e '
-      const props=["file_b64","output_path"];
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const ok=props.includes("file_b64") && !props.some(k=>REF.test(k));
+      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const t={inputSchema:{properties:{file_b64:{type:"string"},options:{type:"object",properties:{output_path:{type:"string"}}}}}};
+      const all=names(t.inputSchema,[]);
+      const top=Object.keys(t.inputSchema.properties);
+      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
       process.exit(ok?0:1);
-      ' 
+      '
   - claim: "xlsx_vault_cure's inputSchema accepts only value inputs (file_b64 bytes; no path/uri/handle to caller-owned state), so it cannot mutate anything external -- destructiveHint:false is correct (MCP: destructiveHint is for irreversible EXTERNAL side-effects; a bytes-in/bytes-out transform has none). mode:in_place selects the RETURNED workbook shape, not a filesystem write."
     region:
       file: generated/tool-floor.generated.js
@@ -125,16 +130,21 @@ refutes:
       const {GENERATED_FLOOR_TOOLS}=require("./generated/tool-floor.generated.js");
       const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_vault_cure");
       if(!t){console.error("xlsx_vault_cure absent");process.exit(2);}
-      const props=Object.keys(t.inputSchema.properties);
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const ok=props.includes("file_b64") && !props.some(k=>REF.test(k));
-      console.log("xlsx_vault_cure top-level inputs:",props.sort().join(","));
+      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const all=names(t.inputSchema,[]);
+      const top=Object.keys(t.inputSchema.properties||{});
+      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      console.log("xlsx_vault_cure inputs (all depths):",all.sort().join(","));
       process.exit(ok?0:1);
       ' 
     must_fail: |-
       node -e '
-      const props=["file_b64","output_path"];
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const ok=props.includes("file_b64") && !props.some(k=>REF.test(k));
+      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const t={inputSchema:{properties:{file_b64:{type:"string"},options:{type:"object",properties:{output_path:{type:"string"}}}}}};
+      const all=names(t.inputSchema,[]);
+      const top=Object.keys(t.inputSchema.properties);
+      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
       process.exit(ok?0:1);
-      ' 
+      '
