@@ -16,6 +16,7 @@ const assert = require('node:assert');
 
 const { TOOLS } = require('../../mcp.js');
 const { TOOL_ANNOTATIONS, applyAnnotations } = require('../../lib/annotations');
+const { diffFloor, bakedNames } = require('../../scripts/gen-tool-floor.js');
 const {
   GENERATED_FLOOR_TOOLS,
   GENERATED_FLOOR_ANNOTATIONS,
@@ -72,4 +73,44 @@ test('generated floor tools and annotations cover the same name set', () => {
   const toolNames = GENERATED_FLOOR_TOOLS.map((t) => t.name).sort();
   const annNames = Object.keys(GENERATED_FLOOR_ANNOTATIONS).sort();
   assert.deepEqual(annNames, toolNames, 'generated tools/annotations name-set mismatch');
+});
+
+// ---------------------------------------------------------------------------
+// XLS-979 — the drift PREDICATE has teeth (the mutation proof).
+//
+// `node scripts/gen-tool-floor.js --check` guards floor-content drift by diffing
+// LIVE inventory against the baked floor. That live half needs the network. This
+// no-network mutation proof exercises the SAME predicate (`diffFloor`, factored
+// out of `check()`) against the REAL baked floor so a standing per-push run
+// proves the guard actually REDs when inventory gains a tool the floor lacks —
+// the exact silent-ship the card names. Without a positive control, a check that
+// can never fail is indistinguishable from one that always passes.
+// ---------------------------------------------------------------------------
+
+test('XLS-979 negative control — the real baked floor vs itself reports NO drift', () => {
+  const baked = bakedNames();
+  const { drift, missingFromFloor, staleInFloor } = diffFloor(baked, baked);
+  assert.equal(drift, false, 'floor diffed against itself must be drift-free');
+  assert.deepEqual(missingFromFloor, []);
+  assert.deepEqual(staleInFloor, []);
+});
+
+test('XLS-979 positive control (mutation) — a tool added to inventory without a floor regen REDs', () => {
+  const baked = bakedNames();
+  // Simulate the server growing its TOOL_INVENTORY by one tool while the baked
+  // floor is untouched (no `tool-floor:generate` run) — the silent-ship the
+  // standing check must catch.
+  const liveWithNewTool = [...baked, 'xlsx_a_new_untiered_tool'];
+  const { drift, missingFromFloor } = diffFloor(liveWithNewTool, baked);
+  assert.equal(drift, true, 'a live tool absent from the floor MUST register as drift');
+  assert.deepEqual(missingFromFloor, ['xlsx_a_new_untiered_tool']);
+});
+
+test('XLS-979 stale control (mutation) — a floor tool dropped from inventory REDs', () => {
+  const baked = bakedNames();
+  const dropped = [...baked][0];
+  const liveMinusOne = [...baked].filter((n) => n !== dropped);
+  const { drift, staleInFloor } = diffFloor(liveMinusOne, baked);
+  assert.equal(drift, true, 'a baked tool no longer live MUST register as drift');
+  assert.deepEqual(staleInFloor, [dropped]);
 });
