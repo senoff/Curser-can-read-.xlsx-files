@@ -80,3 +80,67 @@ refutes:
       sh -c 'chk() { case "$1" in ""|*[!0-9]*) printf CAUGHT;; *) printf PASS;; esac; }; [ "$(chk "")" = CAUGHT ] && [ "$(chk "{message}")" = CAUGHT ] && [ "$(chk 12345)" = PASS ]'
     must_fail: |-
       sh -c 'chk() { case "$1" in "") printf CAUGHT;; *) printf PASS;; esac; }; [ "$(chk "{message}")" = CAUGHT ]'
+  # ---------------------------------------------------------------------------------
+  # 4-5. DESTRUCTIVE-HINT ON BYTES-IN/BYTES-OUT SAVE-AS (XLS-983) — product refute.
+  # xlsx_pii_clean / xlsx_vault_cure set destructiveHint:false. A panel (gemini) reads
+  # the 'Redact'/'Clean' descriptions + mode:in_place as destructive and flags CRITICAL.
+  # It is correct: both tools take file_b64 (bytes) in and return bytes out — no path,
+  # uri, or handle to caller-owned state is in their inputSchema, so there is nothing
+  # external to destroy. destructiveHint is reserved for irreversible EXTERNAL side-
+  # effects (MCP spec; src/lib/tool-annotations.ts:63-67,:119). mode:in_place selects the
+  # RETURNED workbook shape, not a filesystem write. Region-bound to each tool's floor
+  # annotation; the run arm proves 'only value inputs' by requiring the generated module
+  # and inspecting inputSchema; the must_fail arm shows the same assertion goes RED on a
+  # variant that takes an external output_path. Ruled FP by grace-xlsx (XLS-959/983).
+  - claim: "xlsx_pii_clean's inputSchema accepts only value inputs (file_b64 bytes; no path/uri/handle to caller-owned state), so it cannot mutate anything external -- destructiveHint:false is correct (MCP: destructiveHint is for irreversible EXTERNAL side-effects; a bytes-in/bytes-out transform has none). mode:in_place selects the RETURNED workbook shape, not a filesystem write."
+    region:
+      file: generated/tool-floor.generated.js
+      lines: "684-687"
+      hash: sha256:a0a146ddfa9091437ae24aabd6f5588f5ce377e44926948f4b3cf3206383e2cf
+    run: |-
+      node -e '
+      const {GENERATED_FLOOR_TOOLS}=require("./generated/tool-floor.generated.js");
+      const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_pii_clean");
+      if(!t){console.error("xlsx_pii_clean absent");process.exit(2);}
+      const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const all=names(t.inputSchema,[]);
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
+      console.log("xlsx_pii_clean inputs (all depths):",all.sort().join(","));
+      process.exit(ok?0:1);
+      ' 
+    must_fail: |-
+      node -e '
+      const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const t={inputSchema:{type:"object",properties:{file_b64:{type:"string"}},oneOf:[{properties:{output_path:{type:"string"}}}]}};
+      const all=names(t.inputSchema,[]);
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
+      process.exit(ok?0:1);
+      '
+  - claim: "xlsx_vault_cure's inputSchema accepts only value inputs (file_b64 bytes; no path/uri/handle to caller-owned state), so it cannot mutate anything external -- destructiveHint:false is correct (MCP: destructiveHint is for irreversible EXTERNAL side-effects; a bytes-in/bytes-out transform has none). mode:in_place selects the RETURNED workbook shape, not a filesystem write."
+    region:
+      file: generated/tool-floor.generated.js
+      lines: "694-697"
+      hash: sha256:abdb334f627802e77f36176b01e0946c5559472d698bf8acb177814b519b197f
+    run: |-
+      node -e '
+      const {GENERATED_FLOOR_TOOLS}=require("./generated/tool-floor.generated.js");
+      const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_vault_cure");
+      if(!t){console.error("xlsx_vault_cure absent");process.exit(2);}
+      const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const all=names(t.inputSchema,[]);
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
+      console.log("xlsx_vault_cure inputs (all depths):",all.sort().join(","));
+      process.exit(ok?0:1);
+      ' 
+    must_fail: |-
+      node -e '
+      const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const t={inputSchema:{type:"object",properties:{file_b64:{type:"string"}},oneOf:[{properties:{output_path:{type:"string"}}}]}};
+      const all=names(t.inputSchema,[]);
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
+      process.exit(ok?0:1);
+      '
