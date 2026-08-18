@@ -103,21 +103,19 @@ refutes:
       const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_pii_clean");
       if(!t){console.error("xlsx_pii_clean absent");process.exit(2);}
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
       const all=names(t.inputSchema,[]);
-      const top=Object.keys(t.inputSchema.properties||{});
-      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
       console.log("xlsx_pii_clean inputs (all depths):",all.sort().join(","));
       process.exit(ok?0:1);
       ' 
     must_fail: |-
       node -e '
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
-      const t={inputSchema:{properties:{file_b64:{type:"string"},options:{type:"object",properties:{output_path:{type:"string"}}}}}};
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const t={inputSchema:{type:"object",properties:{file_b64:{type:"string"}},oneOf:[{properties:{output_path:{type:"string"}}}]}};
       const all=names(t.inputSchema,[]);
-      const top=Object.keys(t.inputSchema.properties);
-      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
       process.exit(ok?0:1);
       '
   - claim: "xlsx_vault_cure's inputSchema accepts only value inputs (file_b64 bytes; no path/uri/handle to caller-owned state), so it cannot mutate anything external -- destructiveHint:false is correct (MCP: destructiveHint is for irreversible EXTERNAL side-effects; a bytes-in/bytes-out transform has none). mode:in_place selects the RETURNED workbook shape, not a filesystem write."
@@ -131,20 +129,18 @@ refutes:
       const t=GENERATED_FLOOR_TOOLS.find(x=>x.name==="xlsx_vault_cure");
       if(!t){console.error("xlsx_vault_cure absent");process.exit(2);}
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
       const all=names(t.inputSchema,[]);
-      const top=Object.keys(t.inputSchema.properties||{});
-      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
       console.log("xlsx_vault_cure inputs (all depths):",all.sort().join(","));
       process.exit(ok?0:1);
       ' 
     must_fail: |-
       node -e '
       const REF=/path|uri|url|handle|filepath|fd|dest|location|target/i;
-      const names=(s,acc)=>{ if(!s||typeof s!=="object")return acc; if(s.properties)for(const k of Object.keys(s.properties)){acc.push(k);names(s.properties[k],acc);} if(s.items)names(s.items,acc); return acc; };
-      const t={inputSchema:{properties:{file_b64:{type:"string"},options:{type:"object",properties:{output_path:{type:"string"}}}}}};
+      const names=(n,acc)=>{ if(!n||typeof n!=="object")return acc; if(Array.isArray(n)){for(const v of n)names(v,acc);return acc;} for(const [k,v] of Object.entries(n)){ if((k==="properties"||k==="patternProperties")&&v&&typeof v==="object"&&!Array.isArray(v)){for(const pk of Object.keys(v)){acc.push(pk);names(v[pk],acc);}} else {names(v,acc);} } return acc; };
+      const t={inputSchema:{type:"object",properties:{file_b64:{type:"string"}},oneOf:[{properties:{output_path:{type:"string"}}}]}};
       const all=names(t.inputSchema,[]);
-      const top=Object.keys(t.inputSchema.properties);
-      const ok=top.includes("file_b64") && !all.some(k=>REF.test(k));
+      const ok=all.includes("file_b64") && !all.some(k=>REF.test(k));
       process.exit(ok?0:1);
       '
