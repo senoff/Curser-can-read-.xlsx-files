@@ -7,6 +7,21 @@
 
 const GENERATED_FLOOR_TOOLS = [
   {
+    "name": "csv_check",
+    "description": "Verify CSV structure and injection safety",
+    "inputSchema": {
+      "properties": {
+        "file_b64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "printful_catalog_import",
     "description": "Produce Shopify products import CSV from Printful catalog",
     "inputSchema": {
@@ -145,6 +160,10 @@ const GENERATED_FLOOR_TOOLS = [
         "options": {
           "description": "Reserved for future producer options.",
           "type": "object"
+        },
+        "source_platform": {
+          "description": "Optional. The e-commerce platform this file was exported from (e.g. \"woocommerce\"). Supplying it migrates the export into Shopify collections before the native mapping step; omit it to import a file that is already in Shopify collections shape. If the platform is recognized but a collections migration for it is not available yet, the request returns a 400 explaining that — it never guesses.",
+          "type": "string"
         }
       },
       "required": [
@@ -301,6 +320,15 @@ const GENERATED_FLOOR_TOOLS = [
         "options": {
           "description": "Reserved for future producer options.",
           "type": "object"
+        },
+        "source_platform": {
+          "description": "Optional migration source platform. When set, the file is treated as that platform’s product export and migrated to Shopify columns before mapping (stateless, no store connection). Omit for a native Shopify products file.",
+          "enum": [
+            "woocommerce",
+            "bigcommerce",
+            "magento"
+          ],
+          "type": "string"
         }
       },
       "required": [
@@ -408,6 +436,76 @@ const GENERATED_FLOOR_TOOLS = [
     }
   },
   {
+    "name": "xlsx_check",
+    "description": "Verify Excel workbook with an independent engine",
+    "inputSchema": {
+      "properties": {
+        "file_b64": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "xlsx_pii_clean",
+    "description": "Redact personal or sensitive data from an Excel file",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "file_b64": {
+          "maxLength": 14046550,
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "as_copy",
+            "in_place"
+          ],
+          "type": "string"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "type": "boolean"
+            },
+            "finding_ids": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 10000,
+              "type": "array"
+            },
+            "type_keys": {
+              "items": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "simulate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "xlsx_pii_scan",
     "description": "Scan Excel for personal or sensitive data",
     "inputSchema": {
@@ -416,6 +514,70 @@ const GENERATED_FLOOR_TOOLS = [
         "file_b64": {
           "maxLength": 14046550,
           "type": "string"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "xlsx_vault_cure",
+    "description": "Clean hidden or risky content from an Excel file",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "file_b64": {
+          "maxLength": 14046550,
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "as_copy",
+            "in_place"
+          ],
+          "type": "string"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "finding_actions": {
+              "additionalProperties": {
+                "properties": {
+                  "sub_action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sub_action"
+                ],
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "finding_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "risk_tiers": {
+              "items": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "simulate": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -444,6 +606,11 @@ const GENERATED_FLOOR_TOOLS = [
 ];
 
 const GENERATED_FLOOR_ANNOTATIONS = {
+  "csv_check": {
+    "title": "Verify CSV structure and injection safety",
+    "readOnlyHint": true,
+    "destructiveHint": false
+  },
   "printful_catalog_import": {
     "title": "Produce Shopify products import CSV from Printful catalog",
     "readOnlyHint": false,
@@ -509,9 +676,24 @@ const GENERATED_FLOOR_ANNOTATIONS = {
     "readOnlyHint": false,
     "destructiveHint": false
   },
+  "xlsx_check": {
+    "title": "Verify Excel workbook with an independent engine",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
+  "xlsx_pii_clean": {
+    "title": "Redact personal or sensitive data from an Excel file",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
   "xlsx_pii_scan": {
     "title": "Scan Excel for personal or sensitive data",
     "readOnlyHint": true,
+    "destructiveHint": false
+  },
+  "xlsx_vault_cure": {
+    "title": "Clean hidden or risky content from an Excel file",
+    "readOnlyHint": false,
     "destructiveHint": false
   },
   "xlsx_vault_scan": {
