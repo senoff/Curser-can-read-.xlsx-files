@@ -19,6 +19,7 @@ const { resolveCatalog }   = require('./lib/discover');
 const { applyAnnotations, sanitizeForMcp } = require('./lib/annotations');
 const { surface4xx } = require('./lib/inline-4xx');
 const { readFileToBase64 } = require('./lib/read-file');
+const { maybeUploadForRead } = require('./lib/chunk-transport');
 const fs                   = require('fs');
 const fsPromises           = require('fs/promises');
 const os                   = require('os');
@@ -1572,10 +1573,21 @@ async function dispatchTool(name, args) {
   // failure or a base64-bash-hang.
   validateToolArgs(name, args);
 
-  // xlsx_read: relay to API (like every other tool).
+  // xlsx_read: relay to API. Big-file fast path (XLS-958 leg-3, Option A): a
+  // workbook too large to send inline (and not needing formula evaluation, which
+  // the handle read route does not carry) is uploaded once to the server cache
+  // and read by handle via xlsx_read_handle — no 413, no re-transfer. Small files
+  // and evaluate-reads fall through to the ordinary inline path unchanged.
   if (name === 'xlsx_read') {
+    const fileB64 = fileToB64(args.file_path);
+    const handleBody = await maybeUploadForRead(fileB64, {
+      sheet: args.sheet,
+      format: args.format,
+      evaluate: args.evaluate,
+    });
+    if (handleBody) return callTool('xlsx_read_handle', handleBody);
     const body = {
-      file_b64: fileToB64(args.file_path),
+      file_b64: fileB64,
       options: { format: args.format, sheet: args.sheet, evaluate: args.evaluate },
     };
     return callTool('xlsx_read', body);

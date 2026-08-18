@@ -23,6 +23,7 @@ const { ensureRegistered } = require('./lib/register');
 const { callTool }         = require('./lib/client');
 const { surface4xx }       = require('./lib/inline-4xx');
 const { readFileToBase64 } = require('./lib/read-file');
+const { maybeUploadForRead } = require('./lib/chunk-transport');
 const {
   telemetryStatus,
   enableTelemetry,
@@ -668,14 +669,22 @@ async function main() {
   // Server format enum is 'md' | 'json' | 'sql'. The legacy CLI default 'text'
   // maps to the server's default (md). Don't send 'text' — server rejects it.
   const apiFormat = opts.format === 'text' ? undefined : opts.format;
-  const body = {
-    file_b64: fileB64,
-    options: { format: apiFormat, sheet: opts.sheet, evaluate: opts.evaluate },
-  };
 
   let result;
   try {
-    result = await callTool('xlsx_read', body);
+    // Big-file fast path (XLS-958 leg-3, Option A): a workbook too large for an
+    // inline body (and not needing formula evaluation) is uploaded once and read
+    // by handle via xlsx_read_handle; small files / evaluate-reads stay inline.
+    const handleBody = await maybeUploadForRead(fileB64, {
+      sheet: opts.sheet,
+      format: apiFormat,
+      evaluate: opts.evaluate,
+    });
+    const body = handleBody || {
+      file_b64: fileB64,
+      options: { format: apiFormat, sheet: opts.sheet, evaluate: opts.evaluate },
+    };
+    result = await callTool(handleBody ? 'xlsx_read_handle' : 'xlsx_read', body);
   } catch (err) {
     process.stderr.write(friendlyCliError('xlsx-for-ai', err) + '\n');
     process.exit(err.code === 'API_UNREACHABLE' || err.code === 'API_SERVER_ERROR' ? 3 : 1);

@@ -166,6 +166,114 @@ test('downloadWorkbook stops with an error if is_last never arrives within total
   }
 });
 
+test('maybeUploadForRead: a big non-evaluate read uploads and returns an xlsx_read_handle body', async () => {
+  process.env.XFA_CHUNK_THRESHOLD_BYTES = '1024'; // small threshold so a modest buffer trips it
+  process.env.XFA_UPLOAD_CHUNK_BYTES = '4096';
+  const { maybeUploadForRead } = freshTransport();
+  const bytes = crypto.randomBytes(5000); // > 1024 threshold
+  const fileB64 = bytes.toString('base64');
+  const realFetch = globalThis.fetch;
+  const wire = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const body = JSON.parse(init.body);
+    wire.push(u);
+    if (u.endsWith('/upload-chunk')) return jsonResponse({ handle: body.handle, received: body.chunk_index + 1, total: body.total_chunks, complete: false });
+    if (u.endsWith('/finalize')) return jsonResponse({ handle: body.handle, size_bytes: bytes.length });
+    throw new Error(`unexpected ${u}`);
+  };
+  try {
+    const out = await maybeUploadForRead(fileB64, { sheet: 'S1', format: 'json', evaluate: false });
+    assert.ok(out && typeof out.workbook_handle === 'string', 'returns a workbook_handle body');
+    assert.deepEqual(out.options, { sheet: 'S1', format: 'json' }, 'carries sheet+format (no evaluate)');
+    assert.ok(wire.some((u) => u.endsWith('/finalize')), 'the bytes were uploaded + finalized');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.XFA_CHUNK_THRESHOLD_BYTES;
+    delete process.env.XFA_UPLOAD_CHUNK_BYTES;
+  }
+});
+
+test('maybeUploadForRead: a small read stays inline (returns null, no upload)', async () => {
+  const { maybeUploadForRead } = freshTransport(); // default ~15MB threshold
+  const fileB64 = crypto.randomBytes(2000).toString('base64');
+  const realFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; return jsonResponse({}); };
+  try {
+    const out = await maybeUploadForRead(fileB64, { format: 'md' });
+    assert.equal(out, null, 'small file returns null → caller sends inline xlsx_read');
+    assert.equal(called, false, 'no upload happened for a small file');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('maybeUploadForRead: a big read WITH evaluate stays inline (evaluate is not on the handle route)', async () => {
+  process.env.XFA_CHUNK_THRESHOLD_BYTES = '1024';
+  const { maybeUploadForRead } = freshTransport();
+  const fileB64 = crypto.randomBytes(5000).toString('base64');
+  const realFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; return jsonResponse({}); };
+  try {
+    const out = await maybeUploadForRead(fileB64, { evaluate: true });
+    assert.equal(out, null, 'evaluate reads stay inline even when big');
+    assert.equal(called, false, 'no upload for an evaluate read');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.XFA_CHUNK_THRESHOLD_BYTES;
+  }
+});
+
+test('postCache retries a transient 503 on finalize and then succeeds', async () => {
+  process.env.XFA_UPLOAD_CHUNK_BYTES = '4096';
+  const { uploadWorkbook } = freshTransport();
+  const original = crypto.randomBytes(2000); // single chunk
+  let finalizeCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const body = JSON.parse(init.body);
+    if (u.endsWith('/upload-chunk')) {
+      return jsonResponse({ handle: body.handle, received: body.chunk_index + 1, total: body.total_chunks, complete: true });
+    }
+    if (u.endsWith('/finalize')) {
+      finalizeCalls += 1;
+      // First finalize attempt 503s (transient cache blip); the retry succeeds.
+      if (finalizeCalls === 1) {
+        return jsonResponse({ code: 'CACHE_UNAVAILABLE', message: 'workbook cache temporarily unavailable' }, 503);
+      }
+      return jsonResponse({ handle: body.handle, size_bytes: original.length });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  try {
+    const handle = await uploadWorkbook(original);
+    assert.ok(handle && typeof handle === 'string', 'upload recovers across the 503 and returns a handle');
+    assert.equal(finalizeCalls, 2, 'finalize was retried exactly once after the 503');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.XFA_UPLOAD_CHUNK_BYTES;
+  }
+});
+
+test('postCache does NOT retry a 4xx (client error is a fact, not a transient)', async () => {
+  const { downloadWorkbook } = freshTransport();
+  let calls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls += 1;
+    return jsonResponse({ code: 'NOT_FOUND', message: 'handle not found' }, 404);
+  };
+  try {
+    await assert.rejects(downloadWorkbook('missing-handle'), (e) => e.status === 404);
+    assert.equal(calls, 1, 'a 404 is surfaced on the first attempt with no retry');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('shouldUseHandle honors the threshold: default keeps small inline, dial@0 forces handle', async () => {
   const t = freshTransport();
   // Default (~15MB): a 1MB file stays inline, a 30MB file uses a handle.
