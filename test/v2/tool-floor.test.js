@@ -108,6 +108,7 @@ test('XLS-979 positive control (mutation) — a tool added to inventory without 
 
 test('XLS-979 stale control (mutation) — a floor tool dropped from inventory REDs', () => {
   const baked = bakedNames();
+  assert.ok(baked.size > 0, 'baked floor unexpectedly empty — the mutation proof needs a real tool to drop');
   const dropped = [...baked][0];
   const liveMinusOne = [...baked].filter((n) => n !== dropped);
   const { drift, staleInFloor } = diffFloor(liveMinusOne, baked);

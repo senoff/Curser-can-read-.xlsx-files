@@ -43,6 +43,7 @@ jobs:
   guard:
     name: floor guard (no-network structural + mutation proof)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,6 +65,7 @@ jobs:
   live:
     name: floor == live inventory (drift check)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
