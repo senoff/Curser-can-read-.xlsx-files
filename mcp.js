@@ -2241,4 +2241,4 @@ if (require.main === module) {
 // script use TOOLS as the single source of truth for the mcp-tools.json
 // snapshot consumed by the MSFT plugin manifest, and to expose helpers
 // under test.
-module.exports = { applyFileB64, dispatchTool, TOOLS, friendlyErrorMessage };
+module.exports = { applyFileB64, dispatchTool, TOOLS, friendlyErrorMessage, validateToolArgs };
