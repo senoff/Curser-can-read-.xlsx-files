@@ -178,6 +178,25 @@ async function generate() {
   return 0;
 }
 
+/**
+ * The pure drift predicate — the heart of `--check`, factored out so the mutation
+ * proof (test/v2/tool-floor.test.js) can exercise the REAL diff logic with no
+ * network (XLS-979). Both args are name iterables; returns the two directed
+ * differences plus a boolean.
+ *   missingFromFloor: live tool(s) the baked floor lacks — a tool was added to
+ *     inventory without a floor regen. THIS is the failure the standing check
+ *     must RED on (a cold-start agent would never see the tool).
+ *   staleInFloor: baked tool(s) live inventory dropped — the floor names a tool
+ *     the server no longer serves.
+ */
+function diffFloor(liveNames, bakedNames) {
+  const live = liveNames instanceof Set ? liveNames : new Set(liveNames);
+  const baked = bakedNames instanceof Set ? bakedNames : new Set(bakedNames);
+  const missingFromFloor = [...live].filter((n) => !baked.has(n)).sort();
+  const staleInFloor = [...baked].filter((n) => !live.has(n)).sort();
+  return { missingFromFloor, staleInFloor, drift: missingFromFloor.length > 0 || staleInFloor.length > 0 };
+}
+
 async function check() {
   const inv = await fetchInventory();
   const live = new Set(inv.map((t) => t.name));
@@ -188,9 +207,8 @@ async function check() {
     }
   }
   const baked = bakedNames();
-  const missingFromFloor = [...live].filter((n) => !baked.has(n)).sort();
-  const staleInFloor = [...baked].filter((n) => !live.has(n)).sort();
-  if (missingFromFloor.length === 0 && staleInFloor.length === 0) {
+  const { missingFromFloor, staleInFloor, drift } = diffFloor(live, baked);
+  if (!drift) {
     console.log(`floor == inventory (${baked.size} tools) — no drift.`);
     return 0;
   }
@@ -227,4 +245,4 @@ if (require.main === module) {
   main().then((code) => process.exit(code));
 }
 
-module.exports = { toFloorTool, toFloorAnnotation, handAuthoredNames, bakedNames };
+module.exports = { toFloorTool, toFloorAnnotation, handAuthoredNames, bakedNames, diffFloor };
