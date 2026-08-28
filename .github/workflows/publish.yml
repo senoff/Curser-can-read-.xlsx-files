@@ -484,6 +484,13 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      # Checkout is read-only (contents: read, no persisted creds) and exists ONLY so
+      # this job can run the single-sourced smoke harness (scripts/mcp_smoke.py) — the
+      # very code the harness self-test mutation-proves (XLS-988). No repo code is
+      # executed against the published artifact beyond that harness.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -553,52 +560,9 @@ jobs:
         shell: bash
         run: |
           cd smoke
-          python - <<'PYEOF'
-          import json, subprocess, os, time, sys
-          exe = os.path.join('node_modules', '.bin', 'xlsx-for-ai-mcp')
-          # Windows: the bin shim is a .cmd — spawn it as a STRING with shell=True (a list with
-          # shell=True is malformed on Windows). POSIX: spawn the list with shell=False (XLS-959/grace).
-          if os.name == 'nt':
-              p = subprocess.Popen(exe + '.cmd', stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-          else:
-              p = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-          def send(o):
-              p.stdin.write((json.dumps(o) + '\n').encode()); p.stdin.flush()
-          send({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'ci-smoke','version':'1.0'}}})
-          send({'jsonrpc':'2.0','method':'notifications/initialized'})
-          send({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
-          send({'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'xlsx_read','arguments':{'file_path': os.path.abspath('t.xlsx')}}})
-          time.sleep(25)
-          try:
-              p.stdin.close()
-          except Exception:
-              pass
-          # Proactively stop the server, then drain BOTH pipes with a bounded wait — never a
-          # blocking p.stdout.read() that hangs if the server keeps stdout open (XLS-959, grace).
-          p.terminate()
-          try:
-              out, err = p.communicate(timeout=10)
-          except subprocess.TimeoutExpired:
-              p.kill()
-              out, err = p.communicate(timeout=5)
-          out = out.decode(errors='replace')
-          err = (err or b'').decode(errors='replace')
-          ok = {1: False, 2: False, 3: False}
-          for line in out.split('\n'):
-              line = line.strip()
-              if not line: continue
-              try:
-                  m = json.loads(line)
-              except Exception:
-                  print('PROTOCOL CORRUPTION on stdout:', line[:200]); sys.exit(1)
-              if m.get('id') in ok and 'result' in m: ok[m['id']] = True
-              if m.get('id') in ok and 'error' in m:
-                  print('RPC ERROR id', m['id'], ':', str(m['error'])[:300]); sys.exit(1)
-          missing = [k for k, v in ok.items() if not v]
-          if missing:
-              print('MISSING RESPONSES for ids:', missing)
-              print('STDOUT was:', out[:1500])
-              print('STDERR was:', err[:1500])
-              sys.exit(1)
-          print('MCP stdio OK: initialize + tools/list + xlsx_read all answered')
-          PYEOF
+          # Single-sourced harness (scripts/mcp_smoke.py): initialize + tools/list +
+          # xlsx_read must all answer. It closes stdin once (EOF-driven shutdown) and
+          # drains both pipes via communicate() so a >64KB tools/list response is never
+          # truncated by a premature terminate — the XLS-988 false-RED. The identical
+          # code is mutation-proved by .github/workflows/smoke-selftest.yml.
+          python "$GITHUB_WORKSPACE/scripts/mcp_smoke.py" "node_modules/.bin/xlsx-for-ai-mcp" "t.xlsx"
