@@ -4,11 +4,11 @@
 
 *Short name: **xfa** — a real CLI command (`xfa <file>`, `xfa samples`, `xfa --version`) and the prompt shorthand (e.g. "use xfa to read this file"). Same entrypoint as `xlsx-for-ai`; matches the internal `xfa_*` / `XFA_*` brand surface.*
 
-**Let your agent work across all your spreadsheets for you.**
+**Verified values, preserved structure, up to 100MB**
 
-**The missing reliability layer that makes spreadsheet reasoning production-grade for LLMs.**
+The missing reliability layer for spreadsheet work in LLM agents. Read, write, diff, validate, and analyze .xlsx files end-to-end — with merged cells, formulas, named ranges, conditional formatting, pivots, and charts preserved.
 
-A thin npm client over a hosted API. Install once, add to your agent config, and your agent gets 50 production-grade tools for reading, writing, diffing, redacting, healing, and cryptographically attesting `.xlsx` files — engine complexity runs server-side, engine IP stays private.
+xlsx-for-ai makes Claude reliable on real-world Excel files. Forty-plus tools cover the structural surface that pandas-style sandboxes drop on the floor: merged cells, named ranges, formulas with results, conditional formatting, pivots, slicers, charts, comments, data validations, hyperlinks, cross-sheet topology, external links, form controls, VBA macros, document properties, and protection settings. Cross-engine validation catches the corruption other readers silently mask. A hosted recalc engine computes served values in-house — no third-party formula engine in the serve path.
 
 ```bash
 npm install -g xlsx-for-ai
