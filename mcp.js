@@ -453,7 +453,7 @@ const TOOLS = [
   {
     name: 'xlsx_eval',
     description:
-      'evaluate Excel formulas against a LOCAL .xlsx file via HyperFormula. xlwings-style.\n' +
+      'evaluate Excel formulas against a LOCAL .xlsx file with our own recalc engine. xlwings-style.\n' +
       'Two modes: pass `formulas` (array of "=SUM(A1:A10)" expressions to compute against the workbook) or `cells` (array of "Sheet1!A1" cell refs to fresh-evaluate). Replaces pandas\' "trust the cached value" behavior with a real eval — if the cache is stale or missing, this still produces the right answer.\n\n' +
       'USE WHEN: the user wants the live computed value of a formula, not the cached one. Or when a workbook has formulas that depend on external data the cache might be stale on. ' +
       'Engine omits INDIRECT/HYPERLINK/WEBSERVICE/RTD/DDE by design — no I/O risk.\n\n' +
@@ -1259,8 +1259,13 @@ try {
       }
     }
   }
-} catch (_) {
-  /* no generated floor present — hand-authored TOOLS remain the floor */
+} catch (e) {
+  // Swallow ONLY "the generated floor isn't there" (from-source checkout before
+  // first generate). A syntax error or partial write in the generated module is
+  // a REAL corruption that would silently drop 15 tools — rethrow it loudly.
+  if (!(e && e.code === 'MODULE_NOT_FOUND' && /generated[\\/]tool-floor\.generated\.js/.test(e.message))) {
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------
