@@ -202,7 +202,7 @@ The same governed contract is served read-only from two routes — discover the 
 | `xlsx_sort` | Multi-column sort with ascending / descending per column. |
 | `xlsx_value_counts` | Frequency table for a column (pandas `.value_counts()`). |
 | `xlsx_pivot` | Compute a fresh pivot table from raw data — pandas `pivot_table()` shape. |
-| `xlsx_eval` | Evaluate freeform formulas or recompute cell refs via HyperFormula (BSD pure-JS, ~390 functions, no I/O). |
+| `xlsx_eval` | Evaluate freeform formulas or recompute cell refs with our own recalc engine — no third-party formula engine. A formula using a function we haven't implemented yet returns an honest "not supported yet" error, never a wrong value. |
 
 ### Structure-preservation — the moat (pandas drops every one of these on read)
 
@@ -298,7 +298,7 @@ All **50 tools** the MCP server exposes (generated from `tools/list`). Invoke an
 
 - `xlsx_aggregate` — pandas-style df.groupby([cols]).agg({col: func}) on a LOCAL .xlsx file. funcs: sum / mean / min / max / count / count_distinct.
 - `xlsx_diff` — compute a semantic diff between two LOCAL .xlsx files — cell-level deltas, formula changes, added/removed rows.
-- `xlsx_eval` — evaluate Excel formulas against a LOCAL .xlsx file via HyperFormula. xlwings-style.
+- `xlsx_eval` — evaluate Excel formulas against a LOCAL .xlsx file with our own recalc engine. xlwings-style.
 - `xlsx_filter` — pandas-style row filter on a LOCAL .xlsx file with predicates AND-combined: eq/ne/gt/gte/lt/lte/contains/in/is_null/not_null.
 - `xlsx_pivot` — pandas-style pivot_table() on a LOCAL .xlsx file — reshape a flat table into a 2D matrix where rows are unique values of `index`, columns are unique values of `columns`, and cells are an aggregation of `values`.
 - `xlsx_sort` — pandas-style df.sort_values() on a LOCAL .xlsx file with multi-column sort and per-column direction (asc/desc, default asc).
@@ -346,7 +346,7 @@ All **50 tools** the MCP server exposes (generated from `tools/list`). Invoke an
 
 ## Functions
 
-`xlsx_eval` recalculates formulas with [HyperFormula](https://hyperformula.handsontable.com) v3.2.0 — **382 Excel functions** across these categories:
+`xlsx_eval` recalculates formulas with our own recalc engine — **382 Excel functions** across these categories:
 
 - **Math & trig** (101) — ABS, ACOS, ACOSH, ACOT, ACOTH, ARABIC, ASIN, ASINH, ATAN, ATAN2, ATANH, AVERAGE, AVERAGEA, AVERAGEIF, CEILING, CEILING.MATH, CEILING.PRECISE, COMBIN, COMBINA, COS, COSH, COT, COTH, COUNT, COUNTA, COUNTBLANK, COUNTIF, COUNTIFS, COUNTUNIQUE, CSC, CSCH, DEGREES, EVEN, EXP, FACT, FACTDOUBLE, FLOOR, FLOOR.MATH, FLOOR.PRECISE, GCD, INT, ISO.CEILING, LCM, LN, LOG, LOG10, MAX, MAXA, MAXIFS, MIN, MINA, MINIFS, MOD, MROUND, MULTINOMIAL, ODD, PI, POWER, PRODUCT, QUOTIENT, RADIANS, RAND, RANDBETWEEN, ROMAN, ROUND, ROUNDDOWN, ROUNDUP, SEC, SECH, SERIESSUM, SIGN, SIN, SINH, SQRT, SQRTPI, STDEV, STDEV.P, STDEV.S, STDEVA, STDEVP, STDEVPA, STDEVS, SUBTOTAL, SUM, SUMIF, SUMIFS, SUMPRODUCT, SUMSQ, SUMX2MY2, SUMX2PY2, SUMXMY2, TAN, TANH, TRUNC, VAR, VAR.P, VAR.S, VARA, VARP, VARPA, VARS
 - **Statistical** (108) — AVEDEV, BESSELI, BESSELJ, BESSELK, BESSELY, BETA.DIST, BETA.INV, BETADIST, BETAINV, BINOM.DIST, BINOM.INV, BINOMDIST, CHIDIST, CHIDISTRT, CHIINV, CHIINVRT, CHISQ.DIST, CHISQ.DIST.RT, CHISQ.INV, CHISQ.INV.RT, CHISQ.TEST, CHITEST, CONFIDENCE, CONFIDENCE.NORM, CONFIDENCE.T, CORREL, COVAR, COVARIANCE.P, COVARIANCE.S, COVARIANCEP, COVARIANCES, CRITBINOM, DEVSQ, ERF, ERFC, EXPON.DIST, EXPONDIST, F.DIST, F.DIST.RT, F.INV, F.INV.RT, F.TEST, FDIST, FDISTRT, FINV, FINVRT, FISHER, FISHERINV, FTEST, GAMMA, GAMMA.DIST, GAMMA.INV, GAMMADIST, GAMMAINV, GAMMALN, GAMMALN.PRECISE, GAUSS, GEOMEAN, HARMEAN, HYPGEOM.DIST, HYPGEOMDIST, LARGE, LOGINV, LOGNORM.DIST, LOGNORM.INV, LOGNORMDIST, LOGNORMINV, MEDIAN, NEGBINOM.DIST, NEGBINOMDIST, NORM.DIST, NORM.INV, NORM.S.DIST, NORM.S.INV, NORMDIST, NORMINV, NORMSDIST, NORMSINV, PEARSON, PHI, POISSON, POISSON.DIST, POISSONDIST, RSQ, SKEW, SKEW.P, SKEWP, SLOPE, SMALL, STANDARDIZE, STEYX, T.DIST, T.DIST.2T, T.DIST.RT, T.INV, T.INV.2T, T.TEST, TDIST, TDIST2T, TDISTRT, TINV, TINV2T, TTEST, WEIBULL, WEIBULL.DIST, WEIBULLDIST, Z.TEST, ZTEST
