@@ -22,6 +22,154 @@ const GENERATED_FLOOR_TOOLS = [
     }
   },
   {
+    "name": "importable_connect",
+    "description": "Connect this agent to a Shopify store via a merchant-minted code",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "connect_code": {
+          "description": "The single-use connect code the merchant minted in their Importable admin (Settings → Connect an agent). Short-lived and one-time. There is NO shop parameter — the store is resolved from this code server-side.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "connect_code"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "importable_convert",
+    "description": "Convert a merchant file to a Shopify import plan (dry-run)",
+    "inputSchema": {
+      "properties": {
+        "entity": {
+          "description": "Which Shopify entity to convert toward (e.g. \"products\"). Must be a registry-backed entity — call importable_entities for the valid set. An unknown value fails closed.",
+          "type": "string"
+        },
+        "filename": {
+          "description": "Original filename (optional; used in ledger prose).",
+          "type": "string"
+        },
+        "options": {
+          "description": "Reserved for future producer options.",
+          "type": "object"
+        },
+        "source_platform": {
+          "description": "Optional migration source platform. When set, a products file is treated as that platform’s export and migrated to Shopify columns before mapping (stateless, no store connection). Omit for a native Shopify file.",
+          "enum": [
+            "woocommerce",
+            "bigcommerce",
+            "magento"
+          ],
+          "type": "string"
+        },
+        "workbook_handle": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f\\s:*?\\[\\]]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "workbook_handle"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "importable_entities",
+    "description": "List Importable-drivable Shopify entities",
+    "inputSchema": {
+      "properties": {
+        "entity": {
+          "description": "Optional. Return the capability descriptor for exactly this entity (e.g. \"products\"). Must be a registry-backed entity; an unknown value fails closed. Omit to list every drivable entity.",
+          "type": "string"
+        },
+        "options": {
+          "description": "Reserved for future discovery options (no-op today).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "importable_export",
+    "description": "Export a Shopify entity from the connected store",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "Which Shopify entity to export (e.g. \"products\"). Call importable_entities for the set. An unsupported value fails closed.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "format": {
+          "description": "Output format (default \"csv\").",
+          "enum": [
+            "csv",
+            "xlsx"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "importable_import",
+    "description": "Apply a file to the connected Shopify store (dry-run, then owner-approved commit)",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "Which Shopify entity to apply the file to (e.g. \"products\"). Call importable_entities for the set. An unsupported value fails closed.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "input_handle": {
+          "description": "Download handle of a file you have already stashed (e.g. importable_convert output). Resolved as YOUR artifact; an unknown/expired handle fails closed.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "plan_hash": {
+          "description": "Omit for a dry-run preview (writes nothing; returns a plan_hash). Supply the previewed plan_hash to commit — the write, gated on the store owner’s approval of that exact plan.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "input_handle"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "importable_job_status",
+    "description": "Check the status of an Importable import or export run",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "description": "The run id returned when the import/export run was started. The run is looked up on the connected store; an unknown id fails closed.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "printful_catalog_import",
     "description": "Produce Shopify products import CSV from Printful catalog",
     "inputSchema": {
@@ -305,6 +453,54 @@ const GENERATED_FLOOR_TOOLS = [
     }
   },
   {
+    "name": "shopify_metafields_safe_reimport",
+    "description": "Produce a safe Shopify metafields re-import CSV",
+    "inputSchema": {
+      "properties": {
+        "file_b64": {
+          "description": "Base64-encoded CSV or XLSX metafields sheet in row mode: Owner Type, Owner ID, Owner Handle, Owner Parent Handle, Variant SKU, Namespace, Key, Type, Value and an optional Command column — the shape a Shopify metafields export hands back.",
+          "type": "string"
+        },
+        "filename": {
+          "description": "Original filename (optional; used in ledger prose).",
+          "type": "string"
+        },
+        "options": {
+          "description": "Reserved for future producer options.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "shopify_product_metafields_import",
+    "description": "Produce Shopify product-metafields import CSV",
+    "inputSchema": {
+      "properties": {
+        "file_b64": {
+          "description": "Base64-encoded CSV or XLSX with one row per product: a product handle column plus one column per scalar metafield, named however you already name them (for example \"Fabric Content\", \"Wash Instructions\", \"Ingredients\").",
+          "type": "string"
+        },
+        "filename": {
+          "description": "Original filename (optional; used in ledger prose).",
+          "type": "string"
+        },
+        "options": {
+          "description": "Reserved for future producer options.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "shopify_products_import",
     "description": "Produce Shopify products import CSV",
     "inputSchema": {
@@ -436,15 +632,36 @@ const GENERATED_FLOOR_TOOLS = [
     }
   },
   {
+    "name": "shopify_variant_metafields_import",
+    "description": "Produce Shopify variant-metafields import CSV",
+    "inputSchema": {
+      "properties": {
+        "file_b64": {
+          "description": "Base64-encoded CSV or XLSX with one row per variant: a Variant SKU column plus one `Variant Metafield: <namespace>.<key> [<type>]` column per metafield.",
+          "type": "string"
+        },
+        "filename": {
+          "description": "Original filename (optional; used in ledger prose).",
+          "type": "string"
+        },
+        "options": {
+          "description": "Reserved for future producer options.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "file_b64"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "xlsx_check",
     "description": "Verify Excel workbook with an independent engine",
     "inputSchema": {
       "properties": {
         "file_b64": {
           "type": "string"
-        },
-        "stamp": {
-          "type": "boolean"
         }
       },
       "required": [
@@ -460,7 +677,7 @@ const GENERATED_FLOOR_TOOLS = [
       "additionalProperties": false,
       "properties": {
         "file_b64": {
-          "maxLength": 14046550,
+          "maxLength": 28027563,
           "type": "string"
         },
         "mode": {
@@ -512,7 +729,7 @@ const GENERATED_FLOOR_TOOLS = [
       "additionalProperties": false,
       "properties": {
         "file_b64": {
-          "maxLength": 14046550,
+          "maxLength": 28027563,
           "type": "string"
         }
       },
@@ -529,7 +746,7 @@ const GENERATED_FLOOR_TOOLS = [
       "additionalProperties": false,
       "properties": {
         "file_b64": {
-          "maxLength": 14046550,
+          "maxLength": 28027563,
           "type": "string"
         },
         "mode": {
@@ -593,7 +810,7 @@ const GENERATED_FLOOR_TOOLS = [
       "additionalProperties": false,
       "properties": {
         "file_b64": {
-          "maxLength": 14046550,
+          "maxLength": 28027563,
           "type": "string"
         }
       },
@@ -608,6 +825,36 @@ const GENERATED_FLOOR_TOOLS = [
 const GENERATED_FLOOR_ANNOTATIONS = {
   "csv_check": {
     "title": "Verify CSV structure and injection safety",
+    "readOnlyHint": true,
+    "destructiveHint": false
+  },
+  "importable_connect": {
+    "title": "Connect this agent to a Shopify store via a merchant-minted code",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
+  "importable_convert": {
+    "title": "Convert a merchant file to a Shopify import plan (dry-run)",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
+  "importable_entities": {
+    "title": "List Importable-drivable Shopify entities",
+    "readOnlyHint": true,
+    "destructiveHint": false
+  },
+  "importable_export": {
+    "title": "Export a Shopify entity from the connected store",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
+  "importable_import": {
+    "title": "Apply a file to the connected Shopify store (dry-run, then owner-approved commit)",
+    "readOnlyHint": false,
+    "destructiveHint": true
+  },
+  "importable_job_status": {
+    "title": "Check the status of an Importable import or export run",
     "readOnlyHint": true,
     "destructiveHint": false
   },
@@ -656,6 +903,16 @@ const GENERATED_FLOOR_ANNOTATIONS = {
     "readOnlyHint": false,
     "destructiveHint": false
   },
+  "shopify_metafields_safe_reimport": {
+    "title": "Produce a safe Shopify metafields re-import CSV",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
+  "shopify_product_metafields_import": {
+    "title": "Produce Shopify product-metafields import CSV",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
   "shopify_products_import": {
     "title": "Produce Shopify products import CSV",
     "readOnlyHint": false,
@@ -676,9 +933,14 @@ const GENERATED_FLOOR_ANNOTATIONS = {
     "readOnlyHint": false,
     "destructiveHint": false
   },
+  "shopify_variant_metafields_import": {
+    "title": "Produce Shopify variant-metafields import CSV",
+    "readOnlyHint": false,
+    "destructiveHint": false
+  },
   "xlsx_check": {
     "title": "Verify Excel workbook with an independent engine",
-    "readOnlyHint": false,
+    "readOnlyHint": true,
     "destructiveHint": false
   },
   "xlsx_pii_clean": {
