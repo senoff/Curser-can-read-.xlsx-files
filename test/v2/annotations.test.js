@@ -42,6 +42,14 @@ const EXPECTED_TOOL_NAMES = new Set([
   'shopify_url_redirects_import',
   'shopify_google_feed', 'shopify_amazon_feed', 'shopify_ebay_feed',
   'shopify_ups_feed',
+  // XLS-1351 — the importable API surface + shopify metafields writers the server
+  // already serves and lib/annotations.js already annotates; the generated floor
+  // refresh (#68) surfaced them, this expected-set was the one place still behind.
+  // Live-inventory tie: `npm run tool-floor:check`.
+  'importable_connect', 'importable_convert', 'importable_entities',
+  'importable_export', 'importable_import', 'importable_job_status',
+  'shopify_metafields_safe_reimport', 'shopify_product_metafields_import',
+  'shopify_variant_metafields_import',
 ]);
 
 test('TOOL_ANNOTATIONS matches the canonical surfaced-tool list exactly', () => {
